@@ -90,9 +90,9 @@ function remember(state: CaseState): void {
 
 function readUnit(): 'm/s' | 'km/h' {
   try {
-    return localStorage.getItem(SPEED_UNIT) === 'm/s' ? 'm/s' : 'km/h'
+    return localStorage.getItem(SPEED_UNIT) === 'km/h' ? 'km/h' : 'm/s'
   } catch {
-    return 'km/h'
+    return 'm/s'
   }
 }
 

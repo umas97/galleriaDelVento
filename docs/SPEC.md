@@ -620,8 +620,8 @@ Con `L` = estensione del profilo lungo x e `H` = altezza frontale:
 
 - a monte 2·L, a valle 5·L (mai meno di 3·L); **sotto un Re simulato di 1000** a monte 5·L e a
   valle 10·L: a basso Re il corpo disturba il flusso molto lontano e la camera corta falsa i
-  numeri (cilindro a Re 20: Cd 2,82 invece di 2,24). Soglia e lunghezze sono provvisorie
-  (decisione dell'utente, 2026-10-15);
+  numeri (cilindro a Re 20: Cd 2,82 invece di 2,24). Soglia e lunghezze confermate
+  dall'utente (2026-10-15);
 - altezza della camera tale che il **bloccaggio** (H / altezza camera) sia ≤ al valore del
   tipo di studio (§6.5: 5% o 8%), con un minimo di 3·H sopra e sotto l'oggetto (senza
   pavimento) o sopra (con pavimento);
@@ -1045,7 +1045,7 @@ ignorate, valori fuori campo riportati al default con un warning nel log. API
 
 | Chiave | Valori | Default |
 |---|---|---|
-| `unita_velocita` | `m/s` \| `km/h` | `km/h` |
+| `unita_velocita` | `m/s` \| `km/h` | `m/s` |
 | `fluido_predefinito` | `aria` \| `acqua` | `aria` |
 | `temperatura_predefinita_c` | numero nel campo del fluido | 20 |
 | `risoluzione` | `bozza` \| `normale` \| `fine` | `normale` |
