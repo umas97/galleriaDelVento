@@ -1,0 +1,179 @@
+# galleriaDelVento -- real-time 2D wind tunnel for sections, sketches and profiles
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Starting the program, and stopping it.
+
+``__main__`` parses the command line; this is what the bare ``galleriadelvento`` does.
+The order is fixed and every step depends on the one before:
+
+1. take the lockfile -- which is also how a second launch finds the first and
+   asks it for its window instead of starting a second program;
+2. start the server in a background thread and wait until it answers. The
+   window comes after, never before: a page loaded before the port listens
+   shows an error and does not come back;
+3. open the window and give it the main thread, then wait for one of the ways
+   the program ends -- the window closed, "Esci" in the interface, SIGTERM or
+   Ctrl+C. All of them set the same ``stop`` event;
+4. on the way out close the window, stop the server and release the lock, in
+   a ``finally`` that every exit path goes through.
+
+The server always runs in a thread and the main thread always belongs to the
+window (GTK insists on it) or to the wait. Uvicorn installs no signal handlers
+off the main thread, so the program keeps control of its own shutdown.
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import logging.handlers
+import os
+import signal
+import sys
+import threading
+from typing import Any
+
+from . import single_instance
+from .config import APP_ID, APP_NAME, Settings, get_settings
+from .controls import AppControls
+from .server import LocalServer
+
+_log = logging.getLogger(__name__)
+
+#: The log on file: what is left to read when a program started from the menu,
+#: with no terminal, misbehaves. Three files of 1 MB at most.
+LOG_BYTES = 1024 * 1024
+LOG_BACKUPS = 2
+
+
+def want_window(args: argparse.Namespace) -> bool:
+    """Should this launch open a window?
+
+    Yes by default -- the bare command is what the menu entry runs. ``--no-window``
+    turns it off, and so does a session with no display at all (SSH);
+    ``--window`` overrides that check for a session whose variables lie.
+    """
+    if getattr(args, "no_window", False):
+        return False
+    if getattr(args, "window", False):
+        return True
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
+def configure_logging(settings: Settings, terminal_level: str | None) -> None:
+    root = logging.getLogger()
+    root.handlers.clear()
+    file_handler = logging.handlers.RotatingFileHandler(
+        settings.log_dir / f"{APP_ID}.log",
+        maxBytes=LOG_BYTES,
+        backupCount=LOG_BACKUPS,
+        encoding="utf-8",
+        delay=True,
+    )
+    file_handler.setLevel(getattr(logging, settings.log_level, logging.INFO))
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s %(process)d %(levelname)s %(name)s: %(message)s")
+    )
+    terminal = logging.StreamHandler()
+    terminal.setLevel(getattr(logging, terminal_level or "WARNING"))
+    terminal.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+    root.addHandler(file_handler)
+    root.addHandler(terminal)
+    root.setLevel(min(file_handler.level, terminal.level))
+
+
+def _install_signal_handlers(stop: threading.Event) -> None:
+    def handler(signum: int, _frame: object) -> None:
+        _log.info("segnale %s: chiusura", signal.Signals(signum).name)
+        stop.set()
+
+    for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(signum, handler)
+
+
+def run(args: argparse.Namespace) -> int:
+    settings = get_settings()
+    settings.ensure_dirs()
+    configure_logging(settings, args.log_level)
+    port = args.port if args.port is not None else settings.port
+    with_window = want_window(args)
+
+    from .window import WindowHost
+
+    try:
+        lock = single_instance.acquire(port)
+    except single_instance.AlreadyRunning as exc:
+        return _hand_over(exc.info, with_window)
+    except single_instance.PortBusy as exc:
+        print(f"errore: {exc}", file=sys.stderr)
+        return 2
+
+    stop = threading.Event()
+    window: WindowHost | None = None
+    url = ""
+
+    def show_window() -> dict[str, Any]:
+        nonlocal window
+        if window is None:
+            # Started with --no-window: a second launch still gets a window, on
+            # this server, and closing it ends this program as usual.
+            window = WindowHost(browser=getattr(args, "browser", None))
+            window.open(url)
+            window.watch(stop)
+            return {"shown": True, "opened": True}
+        return window.show()
+
+    def window_info() -> dict[str, Any]:
+        return window.info() if window is not None else {"mode": "none"}
+
+    controls = AppControls(
+        quit=stop.set,
+        show_window=show_window,
+        window_info=window_info,
+    )
+    server = LocalServer(controls, settings.host, port)
+    try:
+        bound = server.start()
+    except OSError as exc:
+        print(f"errore: impossibile avviare il server: {exc}", file=sys.stderr)
+        lock.release()
+        return 2
+    lock.update(port=bound)
+    url = f"http://{settings.host}:{bound}/"
+    _log.info("server in ascolto su %s", url)
+    _install_signal_handlers(stop)
+
+    try:
+        if with_window:
+            window = WindowHost(browser=getattr(args, "browser", None) or settings.browser)
+            window.open(url)
+            print(f"{APP_NAME} in ascolto su {url}", flush=True)
+            window.run(stop)
+        else:
+            print(f"{APP_NAME} in ascolto su {url}", flush=True)
+            stop.wait()
+    finally:
+        if window is not None:
+            window.close()
+        server.stop()
+        lock.release()
+        _log.info("chiuso")
+    return 0
+
+
+def _hand_over(info: single_instance.LockInfo, with_window: bool) -> int:
+    """A second launch: show the running program instead of starting another."""
+    print(f"{APP_NAME} è già in esecuzione su {info.url}", flush=True)
+    if not with_window:
+        return 0
+    answer = single_instance.ask_to_show(info.port)
+    if answer is None:
+        print("l'istanza in esecuzione non ha risposto")
+    elif answer.get("opened"):
+        print("nuova finestra aperta sull'istanza in esecuzione")
+    elif answer.get("shown"):
+        print("finestra esistente portata in primo piano")
+    else:
+        print(answer.get("reason") or "la finestra non può essere mostrata")
+    # Exiting non-zero from the menu icon would be a fault; not raising a window
+    # is at most a nuisance, and it has been explained.
+    return 0

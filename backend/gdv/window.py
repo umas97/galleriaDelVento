@@ -1,0 +1,296 @@
+# galleriaDelVento -- real-time 2D wind tunnel for sections, sketches and profiles
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""The application window: a Chromium in ``--app`` mode.
+
+The user must never see a browser. A Chromium started with ``--app=URL`` is a
+window with no address bar, no tabs and no bookmarks; what this module adds is
+what makes it behave like a desktop program rather than a stripped browser:
+
+* a **dedicated profile** under ``$XDG_DATA_HOME``. Without it the window
+  inherits the user's extensions, session and policies, and opens differently
+  depending on whether their browser happened to be running;
+* a **window identity of its own** -- what ``StartupWMClass`` in the menu entry
+  points at. Without it the dock shows Chromium's icon, or another local app's
+  (see :func:`window_class`);
+* the browser process is a **child of this one**, so closing the window is a
+  signal the program can act on, and "Esci" can close the window;
+* a **fallback that says so**: with only Firefox there is no application mode,
+  so the interface opens in an ordinary tab and explains, in one line, why it
+  looks like a browser. Degraded, never mysterious.
+
+This module never installs or downloads a browser.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import re
+import shutil
+import subprocess
+import threading
+import webbrowser
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
+
+from .config import APP_NAME, WINDOW_PATH, get_settings
+
+__all__ = [
+    "BROWSER_CANDIDATES",
+    "FLATPAK_CANDIDATES",
+    "WindowHost",
+    "find_browser",
+    "window_class",
+]
+
+_log = logging.getLogger(__name__)
+
+#: Executables tried in order.
+BROWSER_CANDIDATES: tuple[str, ...] = (
+    "chromium",
+    "chromium-browser",
+    "google-chrome",
+    "google-chrome-stable",
+    "brave-browser",
+    "microsoft-edge",
+)
+#: The same browsers as Flatpak application ids, tried after the native ones.
+FLATPAK_CANDIDATES: tuple[str, ...] = (
+    "org.chromium.Chromium",
+    "com.google.Chrome",
+    "com.brave.Browser",
+    "com.microsoft.Edge",
+)
+#: Size of a fresh window; the profile remembers it afterwards.
+WINDOW_SIZE = "1280,860"
+
+TAB_NOTE = (
+    f"Nessun browser compatibile con la finestra dedicata: {APP_NAME} è aperto in una "
+    "scheda. Installa Chromium (sudo snap install chromium), oppure usa «Installa come "
+    "app» dal menu del browser, per avere una finestra propria."
+)
+
+#: Chromium names app windows after its *own* desktop entry, which is not always
+#: the executable's name. Anything not listed keeps its name.
+_DESKTOP_BASE_NAMES = {
+    "google-chrome": "chrome",
+    "google-chrome-stable": "chrome",
+    "chromium-browser": "chromium",
+}
+
+
+def find_browser(
+    explicit: str | None = None,
+    *,
+    candidates: tuple[str, ...] | None = None,
+    flatpaks: tuple[str, ...] | None = None,
+) -> list[str] | None:
+    """The argv prefix that runs a Chromium, or ``None`` if there is none.
+
+    A list, so that a Flatpak (``flatpak run <id>``) and a binary look the same
+    to the caller. ``candidates`` and ``flatpaks`` exist for the tests.
+    """
+    if explicit:
+        path = Path(explicit).expanduser()
+        if path.is_file() and os.access(path, os.X_OK):
+            return [str(path)]
+        resolved = shutil.which(explicit)
+        if resolved:
+            return [resolved]
+        _log.warning("browser indicato non trovato: %s", explicit)
+        return None
+    for name in BROWSER_CANDIDATES if candidates is None else candidates:
+        resolved = shutil.which(name)
+        if resolved:
+            return [resolved]
+    flatpak = shutil.which("flatpak")
+    if flatpak:
+        for app_id in FLATPAK_CANDIDATES if flatpaks is None else flatpaks:
+            probe = subprocess.run(  # noqa: S603 - fixed argv
+                [flatpak, "info", app_id], capture_output=True, check=False
+            )
+            if probe.returncode == 0:
+                return [flatpak, "run", app_id]
+    return None
+
+
+def _desktop_base_name(command: list[str] | None) -> str:
+    if command is None:
+        # No browser yet (install.sh on a bare machine): Chrome is the most
+        # common, and --class makes X11 agree with whatever turns up later.
+        return "chrome"
+    if Path(command[0]).name == "flatpak" and len(command) >= 3:
+        return command[2]
+    name = Path(command[0]).name
+    if Path(command[0]).parts[:2] == ("/", "snap"):
+        return f"{name}_{name}"  # a snap's desktop entry is <snap>_<app>
+    return _DESKTOP_BASE_NAMES.get(name, name)
+
+
+def window_class(command: list[str] | None = None, url: str | None = None) -> str:
+    """The identity the window gets, as the dock and the window manager see it.
+
+    Under Wayland Chromium ignores ``--class`` and derives the identity from its
+    own desktop name plus the *host and path* of the ``--app`` URL -- never the
+    port. Every local app at ``http://127.0.0.1:<port>/`` would get the same
+    identity, and the dock would give all of them the icon of whichever menu
+    entry claimed it first. Hence ``WINDOW_PATH``: the window opens there, the
+    server redirects it to ``/``, and the identity stays ours. For Chrome:
+    ``chrome-127.0.0.1__galleriadelvento-Default``.
+
+    install.sh writes this into ``StartupWMClass``; the window also gets it as
+    ``--class`` so that an X11 session agrees.
+    """
+    if command is None:
+        command = find_browser(get_settings().browser)
+    parts = urlsplit(url or f"http://127.0.0.1{WINDOW_PATH}")
+    app_name = f"{parts.hostname or ''}_{parts.path or '/'}"
+    return f"{_desktop_base_name(command)}-{re.sub(r'[^A-Za-z0-9._-]', '_', app_name)}-Default"
+
+
+def profile_dir() -> Path:
+    """The window's own browser profile."""
+    return get_settings().data_dir / "window-profile"
+
+
+class WindowHost:
+    """The window this process opened, and how.
+
+    ``mode`` is ``app`` (dedicated window), ``tab`` (fallback, with ``note`` for
+    the interface to show) or ``none`` (not opened yet).
+    """
+
+    def __init__(
+        self,
+        browser: str | None = None,
+        *,
+        candidates: tuple[str, ...] | None = None,
+        flatpaks: tuple[str, ...] | None = None,
+    ) -> None:
+        self._command = find_browser(browser, candidates=candidates, flatpaks=flatpaks)
+        self._lock = threading.Lock()
+        self.process: subprocess.Popen[bytes] | None = None
+        self.mode = "none"
+        self.note: str | None = None
+        self.url: str | None = None
+        self._stop: threading.Event | None = None
+
+    @property
+    def pid(self) -> int | None:
+        return self.process.pid if self.process is not None else None
+
+    @property
+    def alive(self) -> bool:
+        return self.process is not None and self.process.poll() is None
+
+    def argv(self, url: str) -> list[str]:
+        assert self._command is not None
+        app_url = url.split("?", 1)[0].rstrip("/") + WINDOW_PATH
+        wm_class = window_class(self._command, app_url)
+        return [
+            *self._command,
+            f"--app={app_url}",
+            f"--user-data-dir={profile_dir()}",
+            f"--class={wm_class}",
+            f"--name={wm_class}",
+            f"--window-size={WINDOW_SIZE}",
+            "--no-first-run",
+            "--no-default-browser-check",
+        ]
+
+    def open(self, url: str) -> None:
+        """Open the interface: the dedicated window if possible, a tab if not."""
+        with self._lock:
+            self.url = url
+            if self._command is not None:
+                profile_dir().mkdir(parents=True, exist_ok=True)
+                try:
+                    self.process = subprocess.Popen(  # noqa: S603 - argv built here, no shell
+                        self.argv(url), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    )
+                except OSError as exc:
+                    _log.warning("impossibile avviare %s: %s", self._command[0], exc)
+                else:
+                    self.mode, self.note = "app", None
+                    _log.info("finestra aperta con %s", self._command[0])
+                    return
+            _log.info("nessun browser Chromium: apro una scheda del browser predefinito")
+            try:
+                webbrowser.open(url)
+            except Exception as exc:  # noqa: BLE001 - a missing browser is not a crash
+                _log.warning("nessun browser disponibile: %s", exc)
+            self.mode, self.note, self.process = "tab", TAB_NOTE, None
+
+    def watch(self, stop: threading.Event) -> None:
+        """When the window closes, stop the program -- as any desktop program does.
+
+        A tab is not watched: closing a tab is not a reliable sign that the user
+        wants the program gone, so in tab mode it ends from "Esci" or a signal.
+        """
+        self._stop = stop
+        process = self.process
+        if process is None:
+            return
+
+        def wait() -> None:
+            process.wait()
+            if process is self.process:
+                _log.info("finestra chiusa: chiudo il programma")
+                stop.set()
+
+        threading.Thread(target=wait, name="window", daemon=True).start()
+
+    def run(self, stop: threading.Event) -> None:
+        self.watch(stop)
+        stop.wait()
+
+    def show(self) -> dict[str, Any]:
+        """A second launch asked for the window: raise it, or open a new one."""
+        if not self.alive:
+            if self.url is None:
+                return {"shown": False, "reason": "nessuna finestra da mostrare"}
+            self.open(self.url)
+            if self._stop is not None:
+                self.watch(self._stop)
+            return {"shown": True, "opened": True, "mode": self.mode}
+        if self._raise():
+            return {"shown": True}
+        return {
+            "shown": False,
+            "reason": "la finestra è già aperta: cercala fra le finestre "
+            "(installa wmctrl o xdotool perché venga portata in primo piano)",
+        }
+
+    def _raise(self) -> bool:
+        """Bring the window forward with wmctrl or xdotool, when either exists.
+
+        Under Wayland neither can reach a native window; the caller then says
+        where the window is instead of opening a second one.
+        """
+        wm_class = window_class(self._command)
+        for tool, argv in (
+            ("wmctrl", ["-x", "-a", wm_class]),
+            ("xdotool", ["search", "--class", wm_class, "windowactivate", "%1"]),
+        ):
+            path = shutil.which(tool)
+            if path is None:
+                continue
+            result = subprocess.run([path, *argv], capture_output=True, check=False)  # noqa: S603
+            if result.returncode == 0:
+                return True
+        return False
+
+    def info(self) -> dict[str, Any]:
+        return {"mode": self.mode, "note": self.note, "window_pid": self.pid}
+
+    def close(self, timeout: float = 5.0) -> None:
+        """Close the window: politely first, then not."""
+        process, self.process = self.process, None
+        if process is None or process.poll() is not None:
+            return
+        process.terminate()
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process.kill()

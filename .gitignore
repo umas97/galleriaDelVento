@@ -1,0 +1,32 @@
+# Ambiente Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Frontend: la build finisce nel pacchetto Python e si committa solo ai tag di
+# release, perché chi installa da un pacchetto non debba avere Node.
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+backend/gdv/static/*
+!backend/gdv/static/.gitkeep
+
+# File di esempio dell'utente: mai committati
+tests/fixtures/*
+!tests/fixtures/README.md
+
+# Diario di sviluppo: resta in locale
+/STATO.md
+
+# Output locali
+/out/
+
+# Editor e sistema
+.vscode/
+.idea/
+.DS_Store
