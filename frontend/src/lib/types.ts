@@ -104,3 +104,133 @@ export type ModelUpdate = Partial<{
 }>
 
 export type ImportResult = { status: 'created' | 'exists'; model: ModelRecord }
+
+// --- 2D profiles (SPEC §7.1): the Profile2D contract --------------------------
+// Mirrors backend/gdv/geometry/profile.py; test 5 compares the two.
+
+export type Point2 = [number, number]
+
+export type Loop = {
+  points: Point2[]
+}
+
+export type SplineLoop = {
+  kind: 'spline' | 'polyline'
+  points: Point2[]
+  corners: boolean[]
+  symmetric_axis_y: number | null
+}
+
+export type SplineData = {
+  loops: (SplineLoop | null)[]
+}
+
+export type Section3DSource = {
+  kind: 'section3d'
+  model_id: string
+  model_name: string
+  placement: Placement
+  plane: 'vertical' | 'horizontal'
+  depth_m: number
+  depth_fraction: number
+  incidence_deg: number
+  roll_deg: number
+  tilt_deg: number
+  repaired: boolean
+}
+
+export type DrawingSource = {
+  kind: 'svg' | 'dxf'
+  sha256: string
+  file_name: string
+  scale: number
+  units: string | null
+}
+
+export type PhotoSource = {
+  kind: 'photo'
+  sha256: string
+  params: Record<string, unknown>
+}
+
+export type EditorSource = {
+  kind: 'editor'
+  derived_from: string | null
+  origin: Section3DSource | DrawingSource | PhotoSource | null
+}
+
+export type ProfileSource = Section3DSource | DrawingSource | PhotoSource | EditorSource
+
+export type ProfileDraft = {
+  name: string
+  loops: Loop[]
+  source: ProfileSource
+  spline: SplineData | null
+}
+
+export type Profile2D = {
+  name: string
+  loops: Loop[]
+  source: ProfileSource
+  spline: SplineData | null
+  id: string
+  created_at: string
+  schema_version: number
+}
+
+export type IssueCode =
+  | 'no_loops'
+  | 'too_many_loops'
+  | 'too_many_points'
+  | 'too_few_points'
+  | 'points_too_close'
+  | 'self_intersection'
+  | 'zero_area'
+
+export type Issue = {
+  code: IssueCode
+  loop: number | null
+  at: Point2 | null
+}
+
+export type ValidationReport = {
+  valid: boolean
+  issues: Issue[]
+}
+
+// --- the profile library --------------------------------------------------------
+
+export type ProfileSummary = {
+  id: string
+  name: string
+  source_kind: ProfileSource['kind']
+  model_id: string | null
+  model_name: string | null
+  created_at: string
+  loops: number
+  points: number
+  size: [number, number]
+  has_thumbnail: boolean
+  read_only: boolean
+}
+
+export type ProfileEnvelope = { profile: Profile2D; read_only: boolean; has_thumbnail: boolean }
+
+export type CheckResult = {
+  draft: ProfileDraft
+  report: ValidationReport
+  repaired: ProfileDraft | null
+  repaired_report: ValidationReport | null
+}
+
+export type DrawingInfo = {
+  id: string
+  format: 'svg' | 'dxf'
+  file_name: string
+  loops: number
+  open_discarded: number
+  units: string | null
+  metres_per_unit: number | null
+  extent: [number, number]
+  preview: Point2[][]
+}

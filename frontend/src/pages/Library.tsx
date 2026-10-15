@@ -5,13 +5,13 @@
 // studies, with search and sorting, and the drop area that recognises the file.
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Button, Dialog } from '../components/Dialog'
 import { ErrorNotice } from '../components/ErrorNotice'
 import { useImport } from '../components/ImportProvider'
 import { api } from '../lib/api'
 import { bytes, metres, num } from '../lib/format'
-import type { ModelRecord } from '../lib/types'
+import type { ModelRecord, ProfileSummary } from '../lib/types'
 import { t, type MessageKey } from '../i18n/it'
 
 type Tab = 'models' | 'profiles' | 'studies'
@@ -37,7 +37,9 @@ export function LibraryPage() {
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<Sort>('date')
   const { openPicker } = useImport()
+  const navigate = useNavigate()
   const models = useQuery({ queryKey: ['models'], queryFn: api.models })
+  const profiles = useQuery({ queryKey: ['profiles'], queryFn: api.profiles })
 
   const chooseTab = (next: Tab) => {
     setTab(next)
@@ -62,6 +64,7 @@ export function LibraryPage() {
             >
               {t(label)}
               {id === 'models' && models.data ? <span className="ml-1.5 text-ink-300">{models.data.length}</span> : null}
+              {id === 'profiles' && profiles.data ? <span className="ml-1.5 text-ink-300">{profiles.data.length}</span> : null}
             </button>
           ))}
         </nav>
@@ -80,14 +83,12 @@ export function LibraryPage() {
         >
           <option value="date">{t('library.sort.date')}</option>
           <option value="name">{t('library.sort.name')}</option>
-          <option value="size">{t('library.sort.size')}</option>
+          <option value="size">{t(tab === 'profiles' ? 'library.sort.points' : 'library.sort.size')}</option>
         </select>
         <Button kind="primary" onClick={openPicker}>
           {t('library.import')}
         </Button>
-        <Button disabled title={t('library.newProfile.soon')}>
-          {t('library.newProfile')}
-        </Button>
+        <Button onClick={() => navigate('/profili/nuovo')}>{t('library.newProfile')}</Button>
       </div>
 
       <button
@@ -98,7 +99,7 @@ export function LibraryPage() {
       </button>
 
       {tab === 'models' ? <ModelGrid query={models} search={search} sort={sort} /> : null}
-      {tab === 'profiles' ? <p className="py-10 text-center text-ink-300">{t('library.profiles.empty')}</p> : null}
+      {tab === 'profiles' ? <ProfileGrid query={profiles} search={search} sort={sort} /> : null}
       {tab === 'studies' ? <p className="py-10 text-center text-ink-300">{t('library.studies.empty')}</p> : null}
     </div>
   )
@@ -203,6 +204,113 @@ function ModelGrid({
           }
         >
           <p>{t('library.delete.body')}</p>
+          {remove.isError ? <ErrorNotice error={remove.error} /> : null}
+        </Dialog>
+      ) : null}
+    </>
+  )
+}
+
+function ProfileGrid({
+  query,
+  search,
+  sort,
+}: {
+  query: ReturnType<typeof useQuery<ProfileSummary[]>>
+  search: string
+  sort: Sort
+}) {
+  const [toDelete, setToDelete] = useState<ProfileSummary | null>(null)
+  const [freed, setFreed] = useState<number | null>(null)
+  const queryClient = useQueryClient()
+  const remove = useMutation({
+    mutationFn: (id: string) => api.deleteProfile(id),
+    onSuccess: (result) => {
+      setToDelete(null)
+      setFreed(result.freed_bytes)
+      void queryClient.invalidateQueries({ queryKey: ['profiles'] })
+    },
+  })
+
+  const items = useMemo(() => {
+    const needle = search.trim().toLowerCase()
+    const list = (query.data ?? []).filter(
+      (p) =>
+        !needle || p.name.toLowerCase().includes(needle) || (p.model_name ?? '').toLowerCase().includes(needle),
+    )
+    const sorted = [...list]
+    if (sort === 'name') sorted.sort((a, b) => a.name.localeCompare(b.name, 'it'))
+    if (sort === 'size') sorted.sort((a, b) => b.points - a.points)
+    return sorted
+  }, [query.data, search, sort])
+
+  if (query.isPending) return <p className="text-ink-300">{t('common.loading')}</p>
+  if (query.isError) return <ErrorNotice error={query.error} />
+  if (!query.data.length) return <p className="py-10 text-center text-ink-300">{t('library.profiles.empty')}</p>
+  if (!items.length) return <p className="py-10 text-center text-ink-300">{t('library.noMatch')}</p>
+
+  return (
+    <>
+      {freed !== null ? (
+        <p className="text-sm text-ink-300" role="status">
+          {t('library.profile.deleted', { size: bytes(freed) })}
+        </p>
+      ) : null}
+      <ul className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
+        {items.map((profile) => (
+          <li key={profile.id} className="group relative overflow-hidden rounded-lg border border-ink-700 bg-ink-850 hover:border-ink-500">
+            <Link to={`/profili/${profile.id}`} className="block">
+              <div className="aspect-[16/10] bg-ink-800">
+                {profile.has_thumbnail ? (
+                  <img
+                    src={`${api.profileThumbnailUrl(profile.id)}?v=${encodeURIComponent(profile.size.join(',') + profile.points)}`}
+                    alt=""
+                    className="h-full w-full object-cover"
+                    draggable={false}
+                  />
+                ) : (
+                  <div className="grid h-full place-items-center text-3xl text-ink-500">◆</div>
+                )}
+              </div>
+              <div className="space-y-0.5 p-3">
+                <p className="truncate font-medium text-ink-50">{profile.name}</p>
+                <p className="text-xs text-ink-300">
+                  {profile.size.map((d) => metres(d)).join(' × ')} · {t('library.profile.points', { count: num(profile.points, 0) })}
+                  {profile.loops > 1 ? ` · ${t('library.profile.loops', { count: profile.loops })}` : ''}
+                </p>
+                <p className="flex gap-2 text-xs">
+                  <span className="text-ink-300">{t(`source.${profile.source_kind}` as MessageKey)}</span>
+                  {profile.model_name ? <span className="truncate text-ink-300">{profile.model_name}</span> : null}
+                  {profile.read_only ? <span className="text-warn">{t('library.model.readOnly')}</span> : null}
+                </p>
+              </div>
+            </Link>
+            <button
+              className="absolute top-2 right-2 hidden rounded bg-ink-950/80 px-2 py-0.5 text-xs text-ink-200 group-hover:block hover:text-danger focus:block"
+              onClick={() => setToDelete(profile)}
+              aria-label={t('library.delete', { name: profile.name })}
+            >
+              {t('common.delete')}
+            </button>
+          </li>
+        ))}
+      </ul>
+      {toDelete ? (
+        <Dialog
+          title={t('library.delete', { name: toDelete.name })}
+          onClose={remove.isPending ? undefined : () => setToDelete(null)}
+          actions={
+            <>
+              <Button onClick={() => setToDelete(null)} disabled={remove.isPending}>
+                {t('common.cancel')}
+              </Button>
+              <Button kind="danger" onClick={() => remove.mutate(toDelete.id)} disabled={remove.isPending}>
+                {t('common.delete')}
+              </Button>
+            </>
+          }
+        >
+          <p>{t('library.profile.delete.body')}</p>
           {remove.isError ? <ErrorNotice error={remove.error} /> : null}
         </Dialog>
       ) : null}

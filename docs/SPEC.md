@@ -190,11 +190,12 @@ grandi (fino a 500 MB) con validazione.
   di taglio.
 - **WebGL2 diretto** (senza librerie) per il solutore e la sua visualizzazione (§10).
 - **Web Worker** per il taglio delle sezioni (§7.2).
-- **clipper2-js** — porting TypeScript di Clipper2 (Boost Software License 1.0, compatibile con
+- **clipper2-ts** — porting TypeScript di Clipper2 (Boost Software License 1.0, compatibile con
   la GPL): unione booleana e risoluzione delle auto-intersezioni per il riparatore automatico
   delle sezioni dal vivo (§7.2). Scelto rispetto a polygon-clipping perché lavora in aritmetica
-  intera (robusto sui casi degeneri delle scansioni) ed è più veloce. Prima di installarlo,
-  verificare nome esatto del pacchetto npm, manutenzione e licenza; se non convince, chiedere.
+  intera (robusto sui casi degeneri delle scansioni) ed è più veloce. Preferito a `clipper2-js`
+  (fermo da gennaio 2024) perché mantenuto attivamente, senza dipendenze: decisione dell'utente,
+  2026-10-15.
 - **uPlot** — serie temporali, polari, curve Cp.
 - **zustand** — stato locale delle schermate; TanStack Query resta per i dati del server.
 - Solo sviluppo: **vitest**, **playwright-core** con il **Chrome di sistema**
@@ -467,7 +468,7 @@ modello):
    costruzione del `Profile2D` in memoria.
 6. **Riparatore automatico** (sempre attivo sulle sezioni dal vivo): con le scansioni un
    taglio può dare anelli auto-intersecanti o sovrapposti. Il worker esegue la validazione
-   veloce (test 9). Se fallisce, ripara con clipper2-js: unione di tutti gli anelli con
+   veloce (test 9). Se fallisce, ripara con clipper2-ts: unione di tutti gli anelli con
    regola di riempimento NonZero, poi scarto delle schegge con area < 4 celle. La sezione
    riparata entra subito nel flusso, e accanto ai numeri compare il badge **«Contorno riparato
    automaticamente»**. Una sezione dal vivo non blocca mai il flusso per invalidità.
@@ -1107,7 +1108,7 @@ sagoma umana grossolana, schizzo fotografato simulato.
    0,5%; cubo con un buco → anello chiuso dal varco < 1%; piano fuori dal modello → risultato
    vuoto; risultati con numero di sequenza superato scartati.
 9. Validazione di `Profile2D`: stessi esiti tra `profile.py` e la versione TS su 30 casi (validi,
-   auto-intersecanti, degeneri). Sui casi non validi, il riparatore automatico TS (clipper2-js,
+   auto-intersecanti, degeneri). Sui casi non validi, il riparatore automatico TS (clipper2-ts,
    §7.2) e `shapely.make_valid` + unione danno la stessa area entro lo 0,5%, e il risultato TS
    supera `profile.validate`.
 10. Rasterizzazione: `raster2d.py` e `mask.ts` coincidono cella per cella su 20 casi, tra cui
@@ -1215,7 +1216,7 @@ STATO.md.
 
 **GPL-3.0-or-later.** Il progetto sarà pubblicato su GitHub e deve restare open source: la GPL
 obbliga chi distribuisce versioni modificate a pubblicarne il sorgente. Tutte le dipendenze (MIT,
-BSD, Apache-2.0, BSL-1.0 per clipper2-js) sono compatibili con la GPLv3. Ogni nuova dipendenza va controllata anche per la
+BSD, Apache-2.0, BSL-1.0 per clipper2-ts) sono compatibili con la GPLv3. Ogni nuova dipendenza va controllata anche per la
 licenza prima di aggiungerla.
 
 ---

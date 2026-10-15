@@ -33,11 +33,13 @@ from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from . import __version__
-from .api import routes_models
+from .api import routes_models, routes_profiles
 from .config import APP_ID, APP_NAME, WINDOW_PATH
 from .controls import AppControls
 from .errors import AppError
+from .library.drawings import DrawingStore
 from .library.models import ModelStore
+from .library.profiles import ProfileStore
 from .safety import UnsafeWriteError
 from .security import BAD_TOKEN, TOKEN_HEADER, needs_token, refusal, token_matches
 
@@ -141,6 +143,8 @@ def create_app(controls: AppControls | None = None, static_dir: Path | None = No
     app.add_middleware(LocalOnlyMiddleware, token=controls.token)
     app.add_middleware(SecurityHeadersMiddleware)
     app.state.models = ModelStore()
+    app.state.profiles = ProfileStore()
+    app.state.drawings = DrawingStore()
 
     @app.get("/api/health", tags=["app"])
     def health() -> dict[str, Any]:
@@ -182,6 +186,7 @@ def create_app(controls: AppControls | None = None, static_dir: Path | None = No
         logging.getLogger("gdv.frontend").log(level, "%s %s", entry.message, entry.details)
 
     app.include_router(routes_models.router)
+    app.include_router(routes_profiles.router)
 
     @app.exception_handler(AppError)
     async def _app_error(_request: Request, exc: AppError) -> JSONResponse:

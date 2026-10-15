@@ -32,7 +32,7 @@ def _missing() -> str | None:
     return None
 
 
-@pytest.mark.parametrize("script", ["phase1.e2e.mjs"])
+@pytest.mark.parametrize("script", ["phase1.e2e.mjs", "phase2.e2e.mjs"])
 def test_e2e(script, tmp_path):
     reason = _missing()
     if reason:

@@ -137,3 +137,29 @@ def uv_sphere(
         last = 1 + (rings - 2) * segments
         faces.append([len(vertices) - 1, last + jn, last + j])
     return vertices, np.array(faces, dtype=np.int64)
+
+
+def naca4(code: str = "0012", n: int = 100, chord: float = 1.0) -> np.ndarray:
+    """A NACA 4-digit profile, closed trailing edge, CCW, last point not repeated.
+
+    Cosine spacing; starts at the trailing edge, runs over the upper surface to
+    the leading edge and back along the lower one.
+    """
+    m, p, t = int(code[0]) / 100, int(code[1]) / 10, int(code[2:]) / 100
+    beta = np.linspace(0, np.pi, n + 1)
+    x = (1 - np.cos(beta)) / 2
+    yt = 5 * t * (0.2969 * np.sqrt(x) - 0.1260 * x - 0.3516 * x**2 + 0.2843 * x**3 - 0.1036 * x**4)
+    if m > 0:
+        yc = np.where(
+            x < p, m / p**2 * (2 * p * x - x**2), m / (1 - p) ** 2 * (1 - 2 * p + 2 * p * x - x**2)
+        )
+        dyc = np.where(x < p, 2 * m / p**2 * (p - x), 2 * m / (1 - p) ** 2 * (p - x))
+    else:
+        yc = np.zeros_like(x)
+        dyc = np.zeros_like(x)
+    theta = np.arctan(dyc)
+    xu, yu = x - yt * np.sin(theta), yc + yt * np.cos(theta)
+    xl, yl = x + yt * np.sin(theta), yc - yt * np.cos(theta)
+    upper = np.stack([xu, yu], 1)[::-1]  # TE -> LE
+    lower = np.stack([xl, yl], 1)[1:-1]  # LE -> TE, both ends excluded
+    return np.concatenate([upper, lower]) * chord

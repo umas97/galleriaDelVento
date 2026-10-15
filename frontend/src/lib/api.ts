@@ -6,7 +6,18 @@
 // because only the server knows *which* file was wrong. `technical` goes behind
 // the collapsible "Dettagli" (SPEC §15).
 import { t } from '../i18n/it'
-import type { ImportResult, ModelRecord, ModelUpdate, StudyTypePreset } from './types'
+import type {
+  CheckResult,
+  DrawingInfo,
+  ImportResult,
+  ModelRecord,
+  ModelUpdate,
+  Profile2D,
+  ProfileDraft,
+  ProfileEnvelope,
+  ProfileSummary,
+  StudyTypePreset,
+} from './types'
 
 export class ApiError extends Error {
   constructor(
@@ -116,6 +127,46 @@ export const api = {
   thumbnailUrl: (id: string) => `/api/models/${id}/thumbnail.png`,
   putThumbnail: (id: string, png: Blob) =>
     uploadBytes<ModelRecord>(`/api/models/${id}/thumbnail`, png, undefined, 'PUT'),
+
+  profiles: () => request<ProfileSummary[]>('/api/profiles'),
+  profile: (id: string) => request<ProfileEnvelope>(`/api/profiles/${id}`),
+  checkProfile: (draft: ProfileDraft, minArea = 0) =>
+    request<CheckResult>(`/api/profiles/check?min_area=${minArea}`, { method: 'POST', body: json(draft) }),
+  createProfile: (draft: ProfileDraft) =>
+    request<Profile2D>('/api/profiles', { method: 'POST', body: json(draft) }),
+  updateProfile: (id: string, draft: ProfileDraft) =>
+    request<Profile2D>(`/api/profiles/${id}`, { method: 'PUT', body: json(draft) }),
+  deleteProfile: (id: string) =>
+    request<{ freed_bytes: number }>(`/api/profiles/${id}`, { method: 'DELETE' }),
+  profileThumbnailUrl: (id: string) => `/api/profiles/${id}/thumbnail.png`,
+  putProfileThumbnail: (id: string, png: Blob) =>
+    uploadBytes<void>(`/api/profiles/${id}/thumbnail`, png, undefined, 'PUT'),
+  exportProfile: (id: string, format: 'svg' | 'dxf') => download(`/api/profiles/${id}/export.${format}`),
+  exportDraft: (draft: ProfileDraft, format: 'svg' | 'dxf') =>
+    download(`/api/profiles/export.${format}`, { method: 'POST', body: json(draft) }),
+
+  importDrawing: (file: File, onProgress?: (f: number) => void) =>
+    uploadBytes<DrawingInfo>(`/api/drawings/import?nome=${encodeURIComponent(file.name)}`, file, onProgress),
+  drawingDraft: (id: string, scale: number, name: string) =>
+    request<CheckResult>(`/api/drawings/${id}/draft`, { method: 'POST', body: json({ scale, name }) }),
+}
+
+/**
+ * Save a server download as a file through the browser (SPEC §2.1: exports never
+ * write on the server side). The name comes from Content-Disposition.
+ */
+async function download(path: string, init: RequestInit = {}): Promise<void> {
+  const response = await send(path, init)
+  const header = response.headers.get('Content-Disposition') ?? ''
+  const utf8 = /filename\*=UTF-8''([^;]+)/.exec(header)
+  const plain = /filename="([^"]+)"/.exec(header)
+  const name = utf8 ? decodeURIComponent(utf8[1]) : (plain?.[1] ?? 'profilo')
+  const url = URL.createObjectURL(await response.blob())
+  const link = document.createElement('a')
+  link.href = url
+  link.download = name
+  link.click()
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
 
 /** Report an unexpected frontend error to the server log; never throws. */

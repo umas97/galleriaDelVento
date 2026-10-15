@@ -120,11 +120,17 @@ function Setup({ model, update }: { model: ModelRecord; update: Update }) {
         <ReportPanel model={model} />
         <RepairsPanel model={model} disabled={locked} apply={apply} />
 
-        <div className="border-t border-ink-700 pt-4">
+        <div className="flex flex-wrap gap-2 border-t border-ink-700 pt-4">
+          <Tip text={t('setup.sections.tip')}>
+            <Link
+              to={`/modelli/${model.id}/sezioni`}
+              className="inline-block rounded-md bg-accent px-3 py-1.5 text-sm text-ink-950 hover:brightness-110"
+            >
+              {t('setup.sections')}
+            </Link>
+          </Tip>
           <Tip text={t('setup.openTunnel.soon')}>
-            <Button kind="primary" disabled>
-              {t('setup.openTunnel')}
-            </Button>
+            <Button disabled>{t('setup.openTunnel')}</Button>
           </Tip>
         </div>
       </aside>

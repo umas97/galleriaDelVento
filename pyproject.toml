@@ -7,11 +7,14 @@ requires-python = ">=3.12,<3.13"
 license = { text = "GPL-3.0-or-later" }
 authors = [{ name = "umas97" }]
 dependencies = [
+    "ezdxf>=1.4.4",
     "fast-simplification>=0.2.0",
     "fastapi>=0.115",
     "numpy>=2.5.4",
     "python-multipart>=0.0.32",
     "scipy>=1.18.1",
+    "shapely>=2.2.0",
+    "svgelements>=1.9.6",
     "trimesh>=5.1.1",
     "uvicorn>=0.32",
 ]

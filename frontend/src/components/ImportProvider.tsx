@@ -10,9 +10,10 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { sniffFile, type FileKind } from '../lib/sniff'
-import type { ModelRecord } from '../lib/types'
+import type { DrawingInfo, ModelRecord } from '../lib/types'
 import { t } from '../i18n/it'
 import { Button, Dialog } from './Dialog'
+import { DrawingImportDialog } from './DrawingImport'
 import { ErrorNotice } from './ErrorNotice'
 
 type ImportApi = { openPicker: () => void; importFile: (file: File) => void }
@@ -25,6 +26,7 @@ type State =
   | { step: 'idle' }
   | { step: 'uploading'; name: string; progress: number }
   | { step: 'exists'; model: ModelRecord }
+  | { step: 'drawing'; info: DrawingInfo }
   | { step: 'unsupported'; name: string; kind: FileKind }
   | { step: 'error'; name: string; error: unknown }
 
@@ -40,6 +42,16 @@ export function ImportProvider({ children }: { children: ReactNode }) {
   const importFile = useCallback(
     async (file: File) => {
       const kind = await sniffFile(file)
+      if (kind === 'svg' || kind === 'dxf') {
+        setState({ step: 'uploading', name: file.name, progress: 0 })
+        try {
+          const info = await api.importDrawing(file, (progress) => setState({ step: 'uploading', name: file.name, progress }))
+          setState({ step: 'drawing', info })
+        } catch (error) {
+          setState({ step: 'error', name: file.name, error })
+        }
+        return
+      }
       if (kind !== 'mesh') {
         setState({ step: 'unsupported', name: file.name, kind })
         return
@@ -157,6 +169,7 @@ export function ImportProvider({ children }: { children: ReactNode }) {
           <p>{t('import.exists.body', { name: state.model.name })}</p>
         </Dialog>
       ) : null}
+      {state.step === 'drawing' ? <DrawingImportDialog info={state.info} onClose={close} /> : null}
       {state.step === 'unsupported' ? (
         <Dialog title={state.name} onClose={close} actions={<Button onClick={close}>{t('common.ok')}</Button>}>
           <p>{state.kind === 'unknown' ? t('import.unknown') : t('import.notYet')}</p>

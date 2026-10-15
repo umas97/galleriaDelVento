@@ -5,10 +5,10 @@
 // y lateral, z up, metres. Orbit navigation, quick views, a floor grid in
 // metres and the wind arrow. Rendering is on demand: nothing redraws while
 // nothing moves. No drei helper that loads remote assets is ever used (SPEC §2.2).
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
 import { GizmoHelper, GizmoViewport, Grid, OrbitControls } from '@react-three/drei'
-import { ArrowHelper, Box3, BufferGeometry, Color, DoubleSide, Object3D, Vector3 } from 'three'
+import { ArrowHelper, Box3, BufferGeometry, Color, DoubleSide, Matrix4, Object3D, Vector3 } from 'three'
 import { metres } from '../lib/format'
 import type { MeshHeader } from '../lib/meshBinary'
 import { t, type MessageKey } from '../i18n/it'
@@ -109,9 +109,25 @@ type Props = {
   header: MeshHeader | undefined
   floorZ: number | null
   onThumbnail?: (png: Blob) => void
+  /** Extra turn of the model in the tunnel frame (the section rotations). */
+  modelMatrix?: Matrix4
+  /** More objects in the scene, in the tunnel frame (the cutting plane, the trace). */
+  children?: ReactNode
+  /** Smaller labels and no grid caption: the mini-scene of the section screen. */
+  compact?: boolean
+  testId?: string
 }
 
-export function ModelScene({ geometry, header, floorZ, onThumbnail }: Props) {
+export function ModelScene({
+  geometry,
+  header,
+  floorZ,
+  onThumbnail,
+  modelMatrix,
+  children,
+  compact = false,
+  testId = 'model-scene',
+}: Props) {
   const [view, setView] = useState<ViewName>('iso')
   const [nonce, setNonce] = useState(0)
   // Re-frame only when the model's extent really changes, not on every refetch.
@@ -131,14 +147,14 @@ export function ModelScene({ geometry, header, floorZ, onThumbnail }: Props) {
         frameloop="demand"
         gl={{ preserveDrawingBuffer: true, antialias: true }}
         camera={{ fov: 35, position: [-3, -3, 2] }}
-        data-testid="model-scene"
+        data-testid={testId}
       >
         <color attach="background" args={['#141414']} />
         <ambientLight intensity={0.55} />
         <directionalLight position={[2, -3, 5]} intensity={1.6} />
         <directionalLight position={[-3, 2, 1]} intensity={0.5} />
         {geometry ? (
-          <mesh geometry={geometry}>
+          <mesh geometry={geometry} matrixAutoUpdate={!modelMatrix} matrix={modelMatrix}>
             <meshStandardMaterial color="#c9ced8" roughness={0.55} metalness={0.05} side={DoubleSide} />
           </mesh>
         ) : null}
@@ -157,16 +173,17 @@ export function ModelScene({ geometry, header, floorZ, onThumbnail }: Props) {
         <WindArrow box={stableBox} />
         <CameraRig box={stableBox} view={view} nonce={nonce} />
         <OrbitControls makeDefault enableDamping={false} />
-        <GizmoHelper alignment="bottom-left" margin={[56, 56]}>
+        <GizmoHelper alignment="bottom-left" margin={compact ? [46, 46] : [56, 56]}>
           <GizmoViewport axisColors={['#e06c6c', '#7fbf7f', '#7aa2f7']} labelColor="#111" />
         </GizmoHelper>
         {onThumbnail ? <Thumbnail ready={Boolean(geometry)} onCapture={onThumbnail} /> : null}
+        {children}
       </Canvas>
-      <div className="absolute top-2 left-2 flex gap-1">
+      <div className={`absolute top-2 left-2 flex ${compact ? 'gap-0.5' : 'gap-1'}`}>
         {(Object.keys(VIEW_DIRECTIONS) as ViewName[]).map((name) => (
           <button
             key={name}
-            className={`rounded px-2 py-1 text-xs ${view === name ? 'bg-accent text-ink-950' : 'bg-ink-850/90 text-ink-200 hover:bg-ink-700'}`}
+            className={`rounded ${compact ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-1 text-xs'} ${view === name ? 'bg-accent text-ink-950' : 'bg-ink-850/90 text-ink-200 hover:bg-ink-700'}`}
             onClick={() => {
               setView(name)
               setNonce((n) => n + 1)
@@ -176,9 +193,11 @@ export function ModelScene({ geometry, header, floorZ, onThumbnail }: Props) {
           </button>
         ))}
       </div>
-      <div className="pointer-events-none absolute right-2 bottom-2 rounded bg-ink-850/90 px-2 py-1 text-xs text-ink-300">
-        {t('scene.wind')} · {t('scene.grid', { size: metres(cell) })}
-      </div>
+      {compact ? null : (
+        <div className="pointer-events-none absolute right-2 bottom-2 rounded bg-ink-850/90 px-2 py-1 text-xs text-ink-300">
+          {t('scene.wind')} · {t('scene.grid', { size: metres(cell) })}
+        </div>
+      )}
     </div>
   )
 }

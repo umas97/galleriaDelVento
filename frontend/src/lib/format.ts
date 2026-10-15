@@ -45,3 +45,12 @@ export function parseDecimal(text: string): number | null {
   const value = Number(cleaned)
   return Number.isFinite(value) ? value : null
 }
+
+/** A field where keys type text: shortcuts must leave it alone (checkboxes and sliders are not). */
+export function isTextField(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  if (target.isContentEditable || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return true
+  if (target.tagName !== 'INPUT') return false
+  const type = (target as HTMLInputElement).type
+  return !['checkbox', 'radio', 'range', 'button', 'submit', 'color', 'file'].includes(type)
+}
