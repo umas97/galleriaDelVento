@@ -234,3 +234,96 @@ export type DrawingInfo = {
   extent: [number, number]
   preview: Point2[][]
 }
+
+// --- cases (SPEC §9): CaseSetup → CasePlan ------------------------------------------
+// Mirrors backend/gdv/physics/planner.py and fluids.py; test 5 compares them.
+
+export type Fluid = 'aria' | 'acqua'
+export type Resolution = 'bozza' | 'normale' | 'fine'
+export type Ground = 'none' | 'fixed' | 'moving'
+export type InletProfile = 'uniform' | 'boundary_layer'
+export type ReferenceKind = 'length_x' | 'chord' | 'frontal_height' | 'frontal_width' | 'height' | 'custom'
+
+export type Domain = {
+  width_m: number
+  height_m: number
+}
+
+export type ReferenceLength = {
+  kind: ReferenceKind
+  value_m: number | null
+}
+
+export type CaseSetup = {
+  profile: ProfileDraft
+  envelope: [number, number, number, number] | null
+  position: Point2 | null
+  fluid: Fluid
+  temperature_c: number
+  speed: number
+  angle_deg: number
+  ground: Ground
+  inlet_profile: InletProfile
+  domain: Domain | null
+  resolution: Resolution
+  reference_length: ReferenceLength
+  max_blockage: number
+  re_sim_scale: number
+}
+
+export type FluidProperties = {
+  fluid: Fluid
+  temperature_c: number
+  density: number
+  viscosity: number
+  kinematic_viscosity: number
+  speed_of_sound: number
+}
+
+export type PlanTexts = {
+  reynolds: string
+  mach: string
+  grid: string
+}
+
+export type CasePlan = {
+  nx: number
+  ny: number
+  dx: number
+  dt: number
+  width_m: number
+  height_m: number
+  pivot: Point2
+  position: Point2
+  resized: boolean
+  u_lat: number
+  tau: number
+  nu_lat: number
+  tau_min: number
+  smagorinsky_cs: number
+  re_real: number
+  re_sim: number
+  partial_similarity: boolean
+  mach: number
+  mach_warning: boolean
+  reference_kind: ReferenceKind
+  reference_length: number
+  l_lat: number
+  moment_point: Point2
+  tc_steps: number
+  ramp_steps: number
+  transient_steps: number
+  max_steps: number
+  ground: Ground
+  inlet_profile: InletProfile
+  inlet_exponent: number
+  inlet_reference_cells: number
+  sponge_start: number
+  sponge_factor: number
+  sponge_damping: number
+  fluid: FluidProperties
+  speed: number
+  dynamic_pressure: number
+  force_per_coefficient: number
+  texts: PlanTexts
+}

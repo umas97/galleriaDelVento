@@ -8,8 +8,7 @@ read with a small parser for the plain style it is written in (one
 are reduced to the same notation -- ``number``, ``string``, ``array<T>``,
 ``tuple<A,B>``, literal sets, model names, unions -- and compared.
 
-Only the profile contract exists so far; CaseSetup, CasePlan and
-SimulationResult join the list in their phases.
+SimulationResult joins the list in Phase 5.
 """
 
 from __future__ import annotations
@@ -22,6 +21,7 @@ import pytest
 from pydantic import BaseModel
 
 from gdv.geometry import profile
+from gdv.physics import fluids, planner
 
 TYPES_TS = Path(__file__).resolve().parents[1] / "frontend" / "src" / "lib" / "types.ts"
 
@@ -37,6 +37,12 @@ CONTRACTS: list[type[BaseModel]] = [
     profile.Profile2D,
     profile.Issue,
     profile.ValidationReport,
+    planner.Domain,
+    planner.ReferenceLength,
+    planner.CaseSetup,
+    planner.PlanTexts,
+    planner.CasePlan,
+    fluids.FluidProperties,
 ]
 
 # --- Python side ---------------------------------------------------------------------

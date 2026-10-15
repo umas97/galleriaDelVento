@@ -7,6 +7,8 @@
 // the collapsible "Dettagli" (SPEC §15).
 import { t } from '../i18n/it'
 import type {
+  CasePlan,
+  CaseSetup,
   CheckResult,
   DrawingInfo,
   ImportResult,
@@ -144,6 +146,9 @@ export const api = {
   exportProfile: (id: string, format: 'svg' | 'dxf') => download(`/api/profiles/${id}/export.${format}`),
   exportDraft: (draft: ProfileDraft, format: 'svg' | 'dxf') =>
     download(`/api/profiles/export.${format}`, { method: 'POST', body: json(draft) }),
+
+  plan: (setup: CaseSetup, signal?: AbortSignal) =>
+    request<CasePlan>('/api/cases/plan', { method: 'POST', body: json(setup), signal }),
 
   importDrawing: (file: File, onProgress?: (f: number) => void) =>
     uploadBytes<DrawingInfo>(`/api/drawings/import?nome=${encodeURIComponent(file.name)}`, file, onProgress),

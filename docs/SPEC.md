@@ -103,6 +103,15 @@ soggetti**: il backend Python, il JavaScript della pagina e **il processo Chrome
   `--host-resolver-rules="MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"` (nessun nome si risolve tranne
   il loopback). L'elenco esatto va verificato sulla versione di Chrome installata e motivato
   flag per flag in un commento.
+  Verifica su Chrome 155 (2026-10-15, net-log dietro il proxy del test 4): servono anche
+  `--disable-features=AutofillServerCommunication,SafeBrowsingHashPrefixRealTimeLookups,
+  NetworkTimeServiceQuerying,PreconnectToSearch,PreconnectToSearchDesktop`, e i servizi che
+  nessun flag spegne (ListAccounts, idoneità «Modalità AI», aggiornamento di componenti ed
+  estensioni) si dirottano su `http://127.0.0.1:9/` con `--gaia-url`, `--google-base-url`,
+  `--component-updater=url-source=…`, `--apps-gallery-update-url` (la porta 9 è nell'elenco
+  delle porte non sicure di Chrome: la richiesta fallisce prima di aprire un socket). Resta
+  l'«activity reporter» dell'updater, con l'URL scritto nel binario e senza flag: nella finestra
+  fallisce sul DNS, e il test 4 accetta quell'unico host (decisione dell'utente).
 - **Test 4**: l'avvio e una sessione 2D completa devono registrare zero tentativi non-loopback,
   sia dal backend (socket intercettati) sia da Chrome (lanciato con la stessa lista di flag più
   `--proxy-server` verso un proxy di registrazione su loopback e `--proxy-bypass-list=<-loopback>`;
@@ -609,7 +618,10 @@ di Sutherland (20 °C → ρ = 1,204 kg/m³, ν = 1,516·10⁻⁵ m²/s); acqua 
 
 Con `L` = estensione del profilo lungo x e `H` = altezza frontale:
 
-- a monte 2·L, a valle 5·L (mai meno di 3·L);
+- a monte 2·L, a valle 5·L (mai meno di 3·L); **sotto un Re simulato di 1000** a monte 5·L e a
+  valle 10·L: a basso Re il corpo disturba il flusso molto lontano e la camera corta falsa i
+  numeri (cilindro a Re 20: Cd 2,82 invece di 2,24). Soglia e lunghezze sono provvisorie
+  (decisione dell'utente, 2026-10-15);
 - altezza della camera tale che il **bloccaggio** (H / altezza camera) sia ≤ al valore del
   tipo di studio (§6.5: 5% o 8%), con un minimo di 3·H sopra e sotto l'oggetto (senza
   pavimento) o sopra (con pavimento);
@@ -639,7 +651,14 @@ dimezzerebbe la risoluzione sui corpi allungati. Regola:
   U su `max(1000, 0,5 · T_c)` passi, per non generare onde di pressione.
 - **Uscita**: gradiente nullo (copia delle popolazioni entranti dall'ultima colonna interna) più
   una **zona spugna** sull'ultimo 8% del dominio, dove la viscosità sale linearmente fino a 10
-  volte, per assorbire le riflessioni.
+  volte, per assorbire le riflessioni. Nella stessa zona, dopo la collisione, le popolazioni
+  fanno una frazione `0,05 · s` (s da 0 a 1 attraverso la spugna) della strada verso
+  l'equilibrio del flusso indisturbato (densità 1, velocità d'ingresso della riga, v = 0): uno
+  **strato assorbente**. Senza, il primo modo acustico trasversale della camera (pareti a
+  scorrimento libero, riflettenti) risuona con il distacco dei vortici — il rapporto delle
+  frequenze vale c_s·bloccaggio/(2·St·U_lat) ≈ 1 per i corpi tozzi al 5% — e la densità media,
+  che nessun contorno fissa, cresce senza fine quando una parete ha attrito (decisioni
+  dell'utente, 2026-10-15).
 - **Pareti superiore e inferiore**: scorrimento libero (riflessione speculare), così la camera
   approssima il flusso indisturbato.
 - **Pavimento**: `fixed` = rimbalzo no-slip; `moving` = rimbalzo con parete in moto alla
@@ -656,10 +675,13 @@ Input `CaseSetup`, output `CasePlan`, via `POST /api/cases/plan`. Passi:
 2. Velocità reticolare `U_lat` = 0,08 (Mach reticolare 0,14; limite massimo 0,1).
 3. `Re_real = V · L_ref / ν`.
 4. `ν_lat` richiesto = `U_lat · L_lat / Re_real`; `τ = 3·ν_lat + 0,5`.
-5. Se `τ < τ_min` (punto di partenza: **0,502**, con modello di sottogriglia attivo), si fissa
-   `τ = τ_min` e `Re_sim = U_lat · L_lat / ν_lat(τ_min) < Re_real`: **similitudine parziale**. Il
-   valore definitivo di `τ_min` si fissa in Fase 3 misurando la stabilità sui casi dei test
-   21–25, e va scritto in questo paragrafo.
+5. Se `τ < τ_min`, si fissa `τ = τ_min` e `Re_sim = U_lat · L_lat / ν_lat(τ_min) < Re_real`:
+   **similitudine parziale**. **`τ_min = 0,502`**, e **0,504 con il pavimento fisso** (misurato
+   sulla GPU il 2026-10-15, 30.000 passi per caso, Smagorinsky attivo: cilindro e NACA 0012 a 0°,
+   8° e 16°, auto su pavimento mobile e quadrato libero restano stabili fino a 0,5005; un
+   edificio su pavimento fisso con strato limite in ingresso diverge a 0,502 — sopra il tetto
+   |u| arriva a 0,3 reticolare — e regge da 0,504). `U_lat = 0,08` è confermato: sul test 23
+   con `U_lat = 0,04` Cd e St restano identici (1,440 e 0,167).
 6. `Δt = Δx · U_lat / V` (secondi reali per passo) e **tempo di attraversamento** in passi.
    Definizione unica in tutto il programma: **`T_c = L_ref / V`**, cioè il tempo convettivo
    sulla lunghezza di riferimento; in passi vale `L_lat / U_lat`. Tutto ciò che è espresso in
@@ -689,7 +711,10 @@ modello non ne tiene conto».
 ### 9.5 Coefficienti e forze
 
 - **Forze** con il metodo dello **scambio di quantità di moto** sui collegamenti fluido–solido.
-- Coefficienti: `C = F_lat / (½ ρ_lat U_lat² · L_lat)`. Assi: **Cd** lungo x, **Cl** lungo +y del
+- Coefficienti: `C = F_lat / (½ ρ_lat U_lat² · L_lat)`, con `ρ_lat` la **densità indisturbata
+  misurata** (media della seconda colonna, ρ∞), non 1: con ingresso a velocità imposta il livello
+  medio di densità dipende dalla storia del transitorio, e forze e pressioni lo seguono
+  (decisione dell'utente, 2026-10-15). Assi: **Cd** lungo x, **Cl** lungo +y del
   piano, **Cm** (beccheggio) attorno al punto di riferimento (default 25% della corda per le ali,
   centro del bounding box altrimenti), positivo a cabrare.
 - **Forze reali**: `F' = ½ ρ V² · L_ref · C`, in **N/m di profondità**.
@@ -700,7 +725,9 @@ modello non ne tiene conto».
   Fino ad allora i numeri sono «provvisori». Ogni cambio di sezione, incidenza o posizione
   azzera le medie.
 - **Strouhal**: FFT di Cl sulla finestra convergente, `St = f · L_ref / V` (in unità simulate);
-  mostrato solo se il picco supera di 10 volte il rumore di fondo.
+  mostrato solo se il picco supera di 10 volte il rumore di fondo. Il picco si cerca tra St 0,05
+  e 1 (fuori ci sono le onde acustiche dell'avvio), e solo se Cl oscilla davvero (deviazione
+  standard > 10⁻³).
 - **Instabilità**: un NaN o una densità fuori da [0,7; 1,3] in qualunque cella (controllo sulla
   piramide di riduzione, §10.4) ferma il calcolo con «La simulazione è diventata instabile» e il
   pulsante «Riprova con Re simulato più basso» (dimezza `Re_sim`). Mai continuare su un campo
@@ -728,8 +755,11 @@ aggiornano e le medie ripartono.
 ### 10.1 Schema
 
 - Reticolo **D2Q9**, collisione **MRT** (Lallemand–Luo) con modello di sottogriglia
-  **Smagorinsky** (`C_s = 0,1`) applicato al tempo di rilassamento della viscosità. BGK resta
-  disponibile solo come opzione di debug e nel riferimento (§10.8).
+  **Smagorinsky** (`C_s = 0,1`) applicato al tempo di rilassamento della viscosità. Tempi dei
+  momenti non idrodinamici: quelli di Lallemand–Luo, `s_e = 1,64`, `s_ε = 1,54`, `s_q = 1,9`
+  (decisione dell'utente; confermati sui test 21–25: legare `s_q` alla viscosità con Λ = 3/16
+  cambia il Cd del cilindro a Re 20 dello 0,3%). BGK resta disponibile solo come opzione di
+  debug e nel riferimento (§10.8).
 - **float32** con popolazioni memorizzate come deviazione dal peso a riposo (`f_i − w_i`), per
   ridurre l'errore di arrotondamento.
 - Un solo passaggio fuso **stream + collide in schema pull**: ogni frammento legge le 9
@@ -990,6 +1020,8 @@ Ctrl+Z / Ctrl+Shift+Z nell'editor · Esc chiude dialoghi e pannelli. Elenco visi
     `miniatura.png`;
   - `profili/<uuid>.json` (`Profile2D`) + `<uuid>.png` (miniatura);
   - `foto/<sha256[:16]>.<ext>` (copie delle foto degli schizzi);
+  - `disegni/<sha256[:16]>.svg|dxf` (copia intatta dei disegni importati, al massimo 50 MB) +
+    `<sha256[:16]>.json` (nome originale);
   - `studi/<uuid>/studio.json` (`SimulationResult` o serie), `storia.npz`, `campi.npz`
     (float16, compresso), `contorno.npz`, `miniatura.png`, `viste/<velocita|cp|vorticita|fumo>.png`
     (istantanee per il report, §11.2).
@@ -1150,8 +1182,8 @@ sagoma umana grossolana, schizzo fotografato simulato.
 25. Shader contro riferimento (playwright, Chrome di sistema): 500 passi su 256×96, errore
     relativo massimo < 10⁻³; ripetuto con pavimento mobile e con un cambio di maschera a metà.
     Marcato `gpu`; si salta solo se Chrome manca, e lo dice.
-26. Instabilità forzata (τ = 0,5001 senza sottogriglia) → stato «unstable», nessun NaN nei
-    risultati salvati.
+26. Instabilità forzata (τ = 0,5001 senza sottogriglia, `U_lat` = 0,15: l'MRT regge 0,5001 a
+    0,08) → stato «unstable», nessun NaN nei risultati salvati.
 
 **Risultati ed export**
 
@@ -1245,10 +1277,8 @@ licenza prima di aggiungerla.
 ## 22. Punti aperti
 
 - **HEIC** (foto da iPhone): servirebbe `pillow-heif` (libheif è LGPL). Da decidere in Fase 4.
-- **Condizioni al contorno interpolate (Bouzidi)** per ridurre l'effetto «a gradini» sui
-  contorni curvi: solo se i test 22–24 non passano con il rimbalzo a metà via.
-- **`U_lat` = 0,08**: da confermare in Fase 3 confrontando stabilità ed errore di
-  comprimibilità sul test 23.
+- **Condizioni al contorno interpolate (Bouzidi)**: non servono, i test 22–24 passano con il
+  rimbalzo a metà via (Fase 3).
 - **Turbolenza in ingresso** (intensità regolabile) per edifici e veicoli.
 - **Piano di taglio inclinato** rispetto al vento (oggi si ottiene ruotando il modello): da
   valutare se lo scorrimento con rotazioni risulta scomodo.

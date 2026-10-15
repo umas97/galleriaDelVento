@@ -89,6 +89,26 @@ CHROME_OFFLINE_FLAGS: tuple[str, ...] = (
     "--metrics-recording-only",
     # Safe Browsing list downloads.
     "--safebrowsing-disable-auto-update",
+    # Features that call home even with the flags above, each seen in a net-log
+    # of Chrome 155 behind test 4's recording proxy (2026-10-15):
+    # AutofillServerCommunication: form-type queries to content-autofill.googleapis.com;
+    # SafeBrowsingHashPrefixRealTimeLookups: OHTTP key fetch from www.gstatic.com;
+    # NetworkTimeServiceQuerying: clients2.google.com/time;
+    # PreconnectToSearch(Desktop): sockets opened to www.google.com in advance.
+    "--disable-features=AutofillServerCommunication,SafeBrowsingHashPrefixRealTimeLookups,"
+    "NetworkTimeServiceQuerying,PreconnectToSearch,PreconnectToSearchDesktop",
+    # Services no flag turns off, pointed at a dead loopback address. Port 9
+    # (discard) is on Chrome's list of unsafe ports: the request fails before
+    # any socket is opened. GAIA: the ListAccounts call of the account
+    # reconciler; Google base URL: the "AI mode" eligibility fetch; component
+    # and extension updates (beyond --disable-component-update, some still run).
+    "--gaia-url=http://127.0.0.1:9/",
+    "--google-base-url=http://127.0.0.1:9/",
+    "--component-updater=url-source=http://127.0.0.1:9/",
+    "--apps-gallery-update-url=http://127.0.0.1:9/",
+    # Left: the updater's "activity reporter" has its URL compiled in and no
+    # switch. It shows up on some launches; the barrier below makes it fail on
+    # DNS, and test 4 accepts that one host only (decision of 2026-10-15).
     # The final barrier: no name resolves except loopback, so anything the
     # flags above missed fails on DNS instead of leaving the machine.
     "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1",

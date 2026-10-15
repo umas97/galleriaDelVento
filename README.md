@@ -96,10 +96,16 @@ backend/gdv/
   api/               FastAPI routers, one per area
   library/           the on-disk library: models, 2D profiles, imported drawings
   geometry/          STL/OBJ import and repairs, placement, binary mesh format; the Profile2D
-                     contract, its validation and repair; SVG/DXF import, DXF/SVG export
+                     contract, its validation and repair; SVG/DXF import, DXF/SVG export;
+                     raster2d.py, the reference mask of the solver
+  physics/           fluid properties and the planner (CaseSetup -> CasePlan)
+  lattice.py         D2Q9 constants and MRT matrices, the single source of the shader's ones
   static/            the interface served by the server (built from frontend/)
 frontend/src/
-  pages/             screens (Library, ModelSetup, Section, ProfileEditor, ...)
+  pages/             screens (Library, ModelSetup, Section, ProfileEditor, Tunnel, ...)
+  sim2d/             the GPU solver (WebGL2 shaders), mask, views, forces, series, streamlines
+  tunnel/            the tunnel screen (conditions, results, top bar)
+  charts/            uPlot charts (coefficient history, Cp on the contour, probes)
   section/           live sections: the slicer and its Web Worker
   profile/           2D geometry: validation, repair (Clipper2), splines, fitting, measures
   editor/            the profile editor's document (undo/redo, symmetric mode) and canvas
@@ -108,7 +114,9 @@ frontend/src/
   lib/               API client, types mirroring the backend, binary mesh parser
   i18n/it.ts         every user-visible string
 packaging/           icons and their generator
-tests/               pytest; tests/bench/ for the SPEC §17 measurements
+scripts/             gen_lattice_ts.py: writes frontend/src/sim2d/lattice.generated.ts
+tests/               pytest; tests/reference/ the Numba reference solver; tests/bench/ for the
+                     SPEC §17 measurements (slow physics validation: pytest -m slow)
 docs/SPEC.md         the specification
 ```
 
@@ -136,7 +144,9 @@ All permissive licences, compatible with GPL-3.0-or-later.
 | zustand | MIT | screen state |
 | clipper2-ts | BSL-1.0 | automatic repair of live sections: union of self-crossing or overlapping loops in integer arithmetic; chosen over `clipper2-js`, unmaintained since January 2024 |
 | tailwindcss, vite, typescript, vitest | MIT | build and tests (development only) |
+| uplot | MIT | live charts: coefficient history, Cp along the contour, probes |
 | playwright-core | Apache-2.0 | browser tests with the system Chrome (development only) |
+| numba | BSD-2 | the CPU reference solver the shader is checked against (tests only) |
 
 drei components that download assets at runtime (environment maps, GPU detection) are never
 used: the page's Content-Security-Policy would block them anyway.

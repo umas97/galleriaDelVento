@@ -18,6 +18,7 @@
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.28.0",
     "three": "^0.186.1",
+    "uplot": "^1.6.32",
     "zustand": "^5.0.15"
   },
   "devDependencies": {

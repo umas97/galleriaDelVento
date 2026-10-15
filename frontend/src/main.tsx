@@ -24,6 +24,9 @@ window.addEventListener('unhandledrejection', (event) => {
   reportError('unhandledrejection', reason instanceof Error ? `${reason.name}: ${reason.message}\n${reason.stack ?? ''}` : String(reason))
 })
 
+// Test 25 only (see sim2d/selftest.ts): never reached from the interface.
+if (new URLSearchParams(window.location.search).has('selftest')) void import('./sim2d/selftest')
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>

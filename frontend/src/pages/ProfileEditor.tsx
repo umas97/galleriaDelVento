@@ -415,11 +415,17 @@ function Editor({ original, readOnly }: { original: Profile2D | null; readOnly: 
             <Button disabled={!report.valid} onClick={() => exportAs('dxf')}>
               DXF
             </Button>
-            <Tip text={t('setup.openTunnel.soon')}>
-              <Button kind="primary" disabled>
+            {original ? (
+              <Button kind="primary" onClick={() => goBack(`/galleria/profilo/${original.id}`)}>
                 {t('editor.openTunnel')}
               </Button>
-            </Tip>
+            ) : (
+              <Tip text={t('editor.openTunnel.unsaved')}>
+                <Button kind="primary" disabled>
+                  {t('editor.openTunnel')}
+                </Button>
+              </Tip>
+            )}
           </div>
         </Panel>
       </aside>

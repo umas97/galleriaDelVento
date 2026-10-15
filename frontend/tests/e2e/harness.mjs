@@ -88,11 +88,11 @@ export async function startApp() {
   }
 }
 
-export async function launchChrome({ headless = true } = {}) {
+export async function launchChrome({ headless = true, extraArgs = [] } = {}) {
   return chromium.launch({
     channel: 'chrome',
     headless,
-    args: [...offlineFlags(), '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
+    args: [...offlineFlags(), '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', ...extraArgs],
   })
 }
 

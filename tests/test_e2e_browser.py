@@ -32,7 +32,7 @@ def _missing() -> str | None:
     return None
 
 
-@pytest.mark.parametrize("script", ["phase1.e2e.mjs", "phase2.e2e.mjs"])
+@pytest.mark.parametrize("script", ["phase1.e2e.mjs", "phase2.e2e.mjs", "phase3.e2e.mjs"])
 def test_e2e(script, tmp_path):
     reason = _missing()
     if reason:
@@ -42,7 +42,7 @@ def test_e2e(script, tmp_path):
         cwd=FRONTEND,
         capture_output=True,
         text=True,
-        timeout=300,
+        timeout=600,
         check=False,
     )
     assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-4000:]

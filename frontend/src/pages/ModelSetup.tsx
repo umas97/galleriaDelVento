@@ -129,9 +129,12 @@ function Setup({ model, update }: { model: ModelRecord; update: Update }) {
               {t('setup.sections')}
             </Link>
           </Tip>
-          <Tip text={t('setup.openTunnel.soon')}>
-            <Button disabled>{t('setup.openTunnel')}</Button>
-          </Tip>
+          <Link
+            to={`/galleria/modello/${model.id}`}
+            className="inline-block rounded-md border border-ink-500 px-3 py-1.5 text-sm text-ink-100 hover:bg-ink-700"
+          >
+            {t('setup.openTunnel')}
+          </Link>
         </div>
       </aside>
 

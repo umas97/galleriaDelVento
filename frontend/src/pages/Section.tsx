@@ -18,17 +18,17 @@ import { ErrorNotice } from '../components/ErrorNotice'
 import { ProfileView } from '../components/ProfileView'
 import { NameDialog, SaveError, useProfileSaver } from '../components/SaveProfile'
 import { Tip } from '../components/Tip'
-import { api, requestBuffer } from '../lib/api'
+import { api } from '../lib/api'
 import { isTextField, metres, num } from '../lib/format'
 import type { ModelRecord, ProfileDraft, StudyTypePreset } from '../lib/types'
 import { rotatePoints, type Box, type Pt } from '../profile/geometry'
 import { CutPlane } from '../scene3d/CutPlane'
 import { ModelScene } from '../scene3d/ModelScene'
+import { RotateGizmo } from '../scene3d/RotateGizmo'
 import { useModelGeometry } from '../scene3d/useModelGeometry'
-import { createSlicer, type CutDelivery, type SlicerClient } from '../section/client'
 import { attitudeMatrix, incidenceAngle, type Plane, type SliceAttitude } from '../section/frame'
-import type { BenchStats } from '../section/protocol'
 import type { IndexInfo } from '../section/slicer'
+import { useLiveSection } from '../section/useLiveSection'
 import { t } from '../i18n/it'
 
 export function SectionPage() {
@@ -80,67 +80,21 @@ function Workbench({ model, preset }: { model: ModelRecord; preset: StudyTypePre
   const [roll, setRoll] = useState(0)
   const [tilt, setTilt] = useState(0)
   const [incidence, setIncidence] = useState(0)
-  const [loaded, setLoaded] = useState(false)
-  const [index, setIndex] = useState<{ info: IndexInfo; preview: boolean } | null>(null)
-  const [cut, setCut] = useState<CutDelivery | null>(null)
-  const [workerError, setWorkerError] = useState<string | null>(null)
-  const [loadError, setLoadError] = useState<unknown>(null)
   const [mini, setMini] = useState(readMini)
   const [naming, setNaming] = useState(false)
   const [saved, setSaved] = useState<{ id: string; name: string } | null>(null)
-  const [bench, setBench] = useState<BenchStats | null>(null)
-  const client = useRef<SlicerClient | null>(null)
   const saver = useProfileSaver()
   const benchMode = new URLSearchParams(window.location.search).get('bench') === 'slicer'
-
+  const [cellInfo, setCellInfo] = useState<IndexInfo | null>(null)
+  const cell = provisionalCell(cellInfo, model)
+  const live = useLiveSection(model, { plane, fraction, roll, tilt, cell })
+  const { loaded, index, cut, depth, workerError, loadError, bench, release } = live
   const attitude = useMemo<SliceAttitude>(() => ({ plane, roll, tilt }), [plane, roll, tilt])
-  const meshKey = `${model.id}:${JSON.stringify(model.placement)}:${JSON.stringify(model.repairs)}`
-
-  // The worker and the full mesh: once per model (and per placement or repair).
-  useEffect(() => {
-    const slicer = createSlicer()
-    client.current = slicer
-    let alive = true
-    slicer.onIndex = (info, preview) => alive && setIndex({ info, preview })
-    slicer.onCut = (delivery) => alive && setCut(delivery)
-    slicer.onError = (message) => alive && setWorkerError(message)
-    slicer.onBench = (stats) => alive && setBench(stats)
-    setLoaded(false)
-    setIndex(null)
-    setCut(null)
-    requestBuffer(api.meshUrl(model.id, false))
-      .then((buffer) => slicer.load(buffer))
-      .then(() => alive && setLoaded(true))
-      .catch((error: unknown) => alive && setLoadError(error))
-    return () => {
-      alive = false
-      slicer.dispose()
-      client.current = null
-    }
-  }, [meshKey, model.id])
-
-  // A new rotation or plane: a new index (on a sample while a slider is held).
-  const dragging = useRef(false)
-  useEffect(() => {
-    if (loaded) client.current?.setAttitude(attitude, dragging.current)
-  }, [loaded, attitude])
-
-  const release = useCallback(() => {
-    if (!dragging.current) return
-    dragging.current = false
-    client.current?.setAttitude(attitude, false)
-  }, [attitude])
-
   const info = index?.info ?? null
-  const depth = info ? info.depthMin + fraction * (info.depthMax - info.depthMin) : 0
-  const cell = provisionalCell(info, model)
+  useEffect(() => setCellInfo(info), [info])
 
   useEffect(() => {
-    if (info) client.current?.cut(depth, cell)
-  }, [info, depth, cell])
-
-  useEffect(() => {
-    if (benchMode && loaded && !bench) client.current?.bench(attitude, 200, cell)
+    if (benchMode && loaded && !bench) live.runBench(200, cell)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when the mesh is in
   }, [benchMode, loaded])
 
@@ -220,7 +174,7 @@ function Workbench({ model, preset }: { model: ModelRecord; preset: StudyTypePre
 
   /** The section at full detail, on the full mesh (not a sample), for saving or exporting. */
   const detailed = async (name: string) => {
-    const fine = await client.current?.snapshot(depth, cell / SAVE_DETAIL)
+    const fine = await live.snapshot(cell / SAVE_DETAIL)
     if (!fine?.loops.length) return null
     return { draft: draft(name, fine.loops, fine.repaired), raw: fine.repaired ? fine.rawLoops : null }
   }
@@ -292,6 +246,19 @@ function Workbench({ model, preset }: { model: ModelRecord; preset: StudyTypePre
               testId="section-scene"
             >
               <CutPlane plane={plane} depth={depth} envelope={envelope} loops={result?.loops ?? []} open={result?.open ?? []} />
+              <RotateGizmo
+                plane={plane}
+                roll={roll}
+                tilt={tilt}
+                centre={view.data.header.bbox_min.map((v, i) => (v + view.data!.header.bbox_max[i]) / 2) as [number, number, number]}
+                size={0.6}
+                onStart={live.drag}
+                onChange={(r, tl) => {
+                  setRoll(r)
+                  setTilt(tl)
+                }}
+                onEnd={release}
+              />
             </ModelScene>
           </div>
         ) : null}
@@ -355,7 +322,7 @@ function Workbench({ model, preset }: { model: ModelRecord; preset: StudyTypePre
             min={-180}
             max={180}
             onChange={(v) => {
-              dragging.current = true
+              live.drag()
               setRoll(v)
             }}
             onRelease={release}
@@ -366,7 +333,7 @@ function Workbench({ model, preset }: { model: ModelRecord; preset: StudyTypePre
             min={-180}
             max={180}
             onChange={(v) => {
-              dragging.current = true
+              live.drag()
               setTilt(v)
             }}
             onRelease={release}
@@ -407,6 +374,12 @@ function Workbench({ model, preset }: { model: ModelRecord; preset: StudyTypePre
             <Button disabled={!result?.loops.length || index?.preview} onClick={() => void exportAs('dxf')}>
               {t('section.export.dxf')}
             </Button>
+            <Link
+              to={`/galleria/modello/${model.id}`}
+              className="inline-block rounded-md border border-ink-500 px-3 py-1.5 text-sm text-ink-100 hover:bg-ink-700"
+            >
+              {t('setup.openTunnel')}
+            </Link>
           </div>
           <SaveError error={saver.error} />
           {saved ? (
