@@ -31,6 +31,7 @@ def xdg_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
         ("XDG_STATE_HOME", "state"),
         ("XDG_RUNTIME_DIR", "run"),
         ("XDG_CONFIG_HOME", "config"),
+        ("XDG_CACHE_HOME", "cache"),
     ):
         (home / sub).mkdir(parents=True)
         monkeypatch.setenv(variable, str(home / sub))

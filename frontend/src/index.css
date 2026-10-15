@@ -20,6 +20,8 @@
   --color-ink-50: #f5f5f5;
   --color-accent: #7aa2f7;
   --color-warn: #c99a4a;
+  --color-danger: #e06c6c;
+  --color-ok: #7fbf7f;
 }
 
 html,

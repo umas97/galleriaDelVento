@@ -26,13 +26,19 @@ from typing import Any
 
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
-from starlette.datastructures import Headers
-from starlette.types import ASGIApp, Receive, Scope, Send
+from pydantic import BaseModel, Field, ValidationError
+from starlette.datastructures import Headers, MutableHeaders
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from . import __version__
+from .api import routes_models
 from .config import APP_ID, APP_NAME, WINDOW_PATH
 from .controls import AppControls
+from .errors import AppError
+from .library.models import ModelStore
+from .safety import UnsafeWriteError
 from .security import BAD_TOKEN, TOKEN_HEADER, needs_token, refusal, token_matches
 
 __all__ = ["STATIC_DIR", "LocalServer", "create_app"]
@@ -75,10 +81,66 @@ class LocalOnlyMiddleware:
         await response(scope, receive, send)
 
 
+#: No outgoing network from the page, ever (SPEC §2.2). Inline styles are allowed
+#: because libraries set them; scripts only from our own origin.
+CONTENT_SECURITY_POLICY = "; ".join(
+    (
+        "default-src 'self'",
+        "connect-src 'self'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline'",
+        "worker-src 'self' blob:",
+        "img-src 'self' data: blob:",
+        "media-src 'self' blob:",
+        "font-src 'self'",
+        "object-src 'none'",
+        "base-uri 'none'",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+    )
+)
+
+
+class SecurityHeadersMiddleware:
+    """Add the Content-Security-Policy to every HTTP response."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
+                headers["X-Content-Type-Options"] = "nosniff"
+                headers["Referrer-Policy"] = "no-referrer"
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+
+class ClientLog(BaseModel):
+    """An error the interface reports (JS exception, lost WebGL context; SPEC §15)."""
+
+    level: str = Field(default="error", pattern="^(error|warning|info)$")
+    message: str = Field(max_length=4000)
+    details: str = Field(default="", max_length=20000)
+
+
+def _error_body(message: str, technical: str = "") -> dict[str, str]:
+    return {"detail": message, "technical": technical}
+
+
 def create_app(controls: AppControls | None = None, static_dir: Path | None = None) -> FastAPI:
     controls = controls or AppControls()
     app = FastAPI(title=APP_NAME, version=__version__)
     app.add_middleware(LocalOnlyMiddleware, token=controls.token)
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.state.models = ModelStore()
 
     @app.get("/api/health", tags=["app"])
     def health() -> dict[str, Any]:
@@ -113,6 +175,36 @@ def create_app(controls: AppControls | None = None, static_dir: Path | None = No
         return RedirectResponse("/", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
     # --- the project's routes go here, before the interface -------------------
+
+    @app.post("/api/log", status_code=status.HTTP_204_NO_CONTENT, tags=["app"])
+    def client_log(entry: ClientLog) -> None:
+        level = {"error": logging.ERROR, "warning": logging.WARNING}.get(entry.level, logging.INFO)
+        logging.getLogger("gdv.frontend").log(level, "%s %s", entry.message, entry.details)
+
+    app.include_router(routes_models.router)
+
+    @app.exception_handler(AppError)
+    async def _app_error(_request: Request, exc: AppError) -> JSONResponse:
+        return JSONResponse(status_code=exc.status, content=_error_body(exc.message, exc.technical))
+
+    @app.exception_handler(UnsafeWriteError)
+    async def _unsafe(_request: Request, exc: UnsafeWriteError) -> JSONResponse:
+        # Already logged at ERROR by the guard: a defect, never the user's fault.
+        return JSONResponse(
+            status_code=409,
+            content=_error_body("Operazione bloccata per proteggere i tuoi file", str(exc)),
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def _bad_request(_request: Request, exc: RequestValidationError) -> JSONResponse:
+        return JSONResponse(
+            status_code=422, content=_error_body("Richiesta non valida", str(exc.errors()))
+        )
+
+    @app.exception_handler(ValidationError)
+    async def _invalid(_request: Request, exc: ValidationError) -> JSONResponse:
+        first = exc.errors()[0]["msg"] if exc.errors() else str(exc)
+        return JSONResponse(status_code=400, content=_error_body(first, str(exc)))
 
     @app.exception_handler(ValueError)
     async def _bad_value(_request: Request, exc: ValueError) -> JSONResponse:

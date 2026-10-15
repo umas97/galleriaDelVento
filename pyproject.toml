@@ -7,7 +7,12 @@ requires-python = ">=3.12,<3.13"
 license = { text = "GPL-3.0-or-later" }
 authors = [{ name = "umas97" }]
 dependencies = [
+    "fast-simplification>=0.2.0",
     "fastapi>=0.115",
+    "numpy>=2.5.4",
+    "python-multipart>=0.0.32",
+    "scipy>=1.18.1",
+    "trimesh>=5.1.1",
     "uvicorn>=0.32",
 ]
 
@@ -34,7 +39,11 @@ package = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["backend"]
+pythonpath = ["backend", "tests"]
+markers = [
+    "browser: drives the built interface in the system Chrome (playwright-core)",
+    "gpu: needs WebGL2 with float render targets in the system Chrome",
+]
 
 [tool.ruff]
 line-length = 100

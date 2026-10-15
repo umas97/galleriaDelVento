@@ -32,7 +32,7 @@ import sys
 import threading
 from typing import Any
 
-from . import single_instance
+from . import safety, single_instance
 from .config import APP_ID, APP_NAME, Settings, get_settings
 from .controls import AppControls
 from .server import LocalServer
@@ -106,6 +106,9 @@ def run(args: argparse.Namespace) -> int:
     except single_instance.PortBusy as exc:
         print(f"errore: {exc}", file=sys.stderr)
         return 2
+
+    # Only after the lock: a second launch must not empty the first one's files.
+    safety.empty_dir(settings.tmp_dir)
 
     stop = threading.Event()
     window: WindowHost | None = None

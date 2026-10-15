@@ -65,6 +65,35 @@ FLATPAK_CANDIDATES: tuple[str, ...] = (
 #: Size of a fresh window; the profile remembers it afterwards.
 WINDOW_SIZE = "1280,860"
 
+#: No network from Chrome itself (SPEC §2.2). The window, the headless PDF and
+#: the browser tests all use this list. Checked on Google Chrome 155.
+CHROME_OFFLINE_FLAGS: tuple[str, ...] = (
+    # Service traffic in the background: variations seed, field trials, update
+    # pings, the "is the network up" probes.
+    "--disable-background-networking",
+    # Component updater: CRLSets, Widevine, certificate-transparency lists...
+    "--disable-component-update",
+    # Google account sync.
+    "--disable-sync",
+    # Default web apps installed (and fetched) on a fresh profile.
+    "--disable-default-apps",
+    # Extensions and their update checks.
+    "--disable-extensions",
+    # Domain Reliability: reports of failed requests to Google.
+    "--disable-domain-reliability",
+    # Crash reporter uploads.
+    "--disable-breakpad",
+    # Hyperlink auditing pings (<a ping>).
+    "--no-pings",
+    # Metrics are recorded locally but never uploaded.
+    "--metrics-recording-only",
+    # Safe Browsing list downloads.
+    "--safebrowsing-disable-auto-update",
+    # The final barrier: no name resolves except loopback, so anything the
+    # flags above missed fails on DNS instead of leaving the machine.
+    "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1",
+)
+
 TAB_NOTE = (
     f"Nessun browser compatibile con la finestra dedicata: {APP_NAME} è aperto in una "
     "scheda. Installa Chromium (sudo snap install chromium), oppure usa «Installa come "
@@ -197,6 +226,7 @@ class WindowHost:
             f"--window-size={WINDOW_SIZE}",
             "--no-first-run",
             "--no-default-browser-check",
+            *CHROME_OFFLINE_FLAGS,
         ]
 
     def open(self, url: str) -> None:

@@ -91,3 +91,27 @@ def test_with_no_chromium_it_falls_back_to_a_tab_and_says_so(monkeypatch, xdg_ho
     stop = threading.Event()
     window.watch(stop)
     assert not stop.wait(0.2)
+
+
+def test_4_the_window_argv_carries_the_offline_flags(tmp_path, xdg_home):
+    """Test 4 (argv part): Chrome is told not to talk to the network (SPEC §2.2)."""
+    from gdv.window import CHROME_OFFLINE_FLAGS
+
+    argv = WindowHost(str(fake_browser(tmp_path))).argv("http://127.0.0.1:8853/")
+    for flag in (
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-background-networking",
+        "--disable-component-update",
+        "--disable-sync",
+        "--disable-default-apps",
+        "--disable-extensions",
+        "--disable-domain-reliability",
+        "--disable-breakpad",
+        "--no-pings",
+        "--metrics-recording-only",
+        "--safebrowsing-disable-auto-update",
+        "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1",
+    ):
+        assert flag in argv
+    assert set(CHROME_OFFLINE_FLAGS) <= set(argv)

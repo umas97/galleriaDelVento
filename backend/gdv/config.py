@@ -7,6 +7,8 @@ running it -- never next to the files it works on, never inside the source tree:
 
 * ``$XDG_DATA_HOME/galleriadelvento/`` -- the user's data, what a backup must keep;
 * ``$XDG_STATE_HOME/galleriadelvento/logs/`` -- the log;
+* ``$XDG_CONFIG_HOME/galleriadelvento/`` -- the persistent settings;
+* ``$XDG_CACHE_HOME/galleriadelvento/tmp/`` -- temporary files, emptied at start-up;
 * ``$XDG_RUNTIME_DIR/galleriadelvento.lock`` -- the single-instance lock. That
   directory is a tmpfs emptied at logout, so a lock can never outlive a reboot.
 
@@ -56,6 +58,8 @@ class Settings:
     log_level: str
     data_dir: Path
     state_dir: Path
+    config_dir: Path
+    cache_dir: Path
     runtime_dir: Path
     browser: str | None
 
@@ -64,12 +68,21 @@ class Settings:
         return self.state_dir / "logs"
 
     @property
+    def tmp_dir(self) -> Path:
+        return self.cache_dir / "tmp"
+
+    @property
     def lock_path(self) -> Path:
         return self.runtime_dir / f"{APP_ID}.lock"
 
+    @property
+    def writable_roots(self) -> tuple[Path, ...]:
+        """The only places the program may write into (see ``safety.py``)."""
+        return (self.data_dir, self.state_dir, self.config_dir, self.cache_dir)
+
     def ensure_dirs(self) -> None:
         """Create the directories the program writes into."""
-        for path in (self.data_dir, self.log_dir):
+        for path in (self.data_dir, self.log_dir, self.config_dir, self.tmp_dir):
             path.mkdir(parents=True, exist_ok=True)
 
 
@@ -85,6 +98,8 @@ def get_settings() -> Settings:
         log_level=(env("LOG_LEVEL") or "INFO").upper(),
         data_dir=_xdg("XDG_DATA_HOME", ".local/share"),
         state_dir=state,
+        config_dir=_xdg("XDG_CONFIG_HOME", ".config"),
+        cache_dir=_xdg("XDG_CACHE_HOME", ".cache"),
         runtime_dir=Path(runtime) if runtime else state,
         browser=env("BROWSER"),
     )

@@ -4,6 +4,7 @@
 // A fatal error must not leave a white window with no way out: the window has
 // no reload button of its own, so this one provides it.
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { reportError } from '../lib/api'
 import { t } from '../i18n/it'
 
 type State = { error: Error | null }
@@ -17,6 +18,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error(error, info.componentStack)
+    reportError(`${error.name}: ${error.message}`, `${error.stack ?? ''}\n${info.componentStack ?? ''}`)
   }
 
   render() {

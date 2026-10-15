@@ -3,13 +3,16 @@
 //
 // The one place that talks to the server. Errors carry the server's `detail`,
 // an Italian sentence written for a person: the interface shows it as it is,
-// because only the server knows *which* file was wrong.
+// because only the server knows *which* file was wrong. `technical` goes behind
+// the collapsible "Dettagli" (SPEC §15).
 import { t } from '../i18n/it'
+import type { ImportResult, ModelRecord, ModelUpdate, StudyTypePreset } from './types'
 
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly technical: string = '',
   ) {
     super(message)
     this.name = 'ApiError'
@@ -22,9 +25,16 @@ export type WindowInfo = {
   can_quit: boolean
 }
 
-export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+type ErrorBody = { detail?: unknown; technical?: string }
+
+function errorFrom(status: number, statusText: string, body: ErrorBody | null): ApiError {
+  const detail = typeof body?.detail === 'string' ? body.detail : statusText || t('error.generic')
+  return new ApiError(status, detail, body?.technical ?? '')
+}
+
+async function send(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers)
-  if (init.body !== undefined && !headers.has('Content-Type')) {
+  if (typeof init.body === 'string' && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
   let response: Response
@@ -34,20 +44,81 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     throw new ApiError(0, t('error.network'))
   }
   if (!response.ok) {
-    let detail = response.statusText
+    let body: ErrorBody | null = null
     try {
-      detail = ((await response.json()) as { detail?: string }).detail ?? detail
+      body = (await response.json()) as ErrorBody
     } catch {
       // not JSON: keep the status text
     }
-    throw new ApiError(response.status, detail)
+    throw errorFrom(response.status, response.statusText, body)
   }
+  return response
+}
+
+export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await send(path, init)
   if (response.status === 204) return undefined as T
   return (await response.json()) as T
 }
+
+export async function requestBuffer(path: string, signal?: AbortSignal): Promise<ArrayBuffer> {
+  return (await send(path, { signal })).arrayBuffer()
+}
+
+/** Upload raw bytes with progress (fetch cannot report upload progress). */
+export function uploadBytes<T>(
+  path: string,
+  body: Blob,
+  onProgress?: (fraction: number) => void,
+  method = 'POST',
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open(method, path)
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream')
+    xhr.responseType = 'json'
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && onProgress) onProgress(event.loaded / event.total)
+    }
+    xhr.onerror = () => reject(new ApiError(0, t('error.network')))
+    xhr.onload = () => {
+      const body = xhr.response as ErrorBody | T | null
+      if (xhr.status >= 200 && xhr.status < 300) resolve(body as T)
+      else reject(errorFrom(xhr.status, xhr.statusText, body as ErrorBody | null))
+    }
+    xhr.send(body)
+  })
+}
+
+const json = (value: unknown) => JSON.stringify(value)
 
 export const api = {
   health: () => request<{ status: string; app: string; version: string }>('/api/health'),
   window: () => request<WindowInfo>('/api/window'),
   quit: () => request<{ detail: string }>('/api/app/quit', { method: 'POST' }),
+  log: (message: string, details = '', level: 'error' | 'warning' | 'info' = 'error') =>
+    request<void>('/api/log', { method: 'POST', body: json({ message, details, level }) }),
+
+  studyTypes: () => request<StudyTypePreset[]>('/api/study-types'),
+  models: () => request<ModelRecord[]>('/api/models'),
+  model: (id: string) => request<ModelRecord>(`/api/models/${id}`),
+  updateModel: (id: string, change: ModelUpdate) =>
+    request<ModelRecord>(`/api/models/${id}`, { method: 'PATCH', body: json(change) }),
+  deleteModel: (id: string) =>
+    request<{ freed_bytes: number }>(`/api/models/${id}`, { method: 'DELETE' }),
+  importModel: (file: File, onProgress?: (f: number) => void) =>
+    uploadBytes<ImportResult>(
+      `/api/models/import?nome=${encodeURIComponent(file.name)}`,
+      file,
+      onProgress,
+    ),
+  meshUrl: (id: string, view: boolean) => `/api/models/${id}/${view ? 'vista' : 'mesh'}.bin`,
+  thumbnailUrl: (id: string) => `/api/models/${id}/thumbnail.png`,
+  putThumbnail: (id: string, png: Blob) =>
+    uploadBytes<ModelRecord>(`/api/models/${id}/thumbnail`, png, undefined, 'PUT'),
+}
+
+/** Report an unexpected frontend error to the server log; never throws. */
+export function reportError(message: string, details = ''): void {
+  api.log(message, details).catch(() => undefined)
 }

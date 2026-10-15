@@ -7,15 +7,20 @@
 // URLs, it can only be a stale link.
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { AppShell } from './components/AppShell'
-import { HomePage } from './pages/Home'
+import { ImportProvider } from './components/ImportProvider'
+import { LibraryPage } from './pages/Library'
+import { ModelSetupPage } from './pages/ModelSetup'
 
 export function App() {
   return (
-    <AppShell>
-      <Routes>
-        <Route path="/" element={<HomePage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </AppShell>
+    <ImportProvider>
+      <AppShell>
+        <Routes>
+          <Route path="/" element={<LibraryPage />} />
+          <Route path="/modelli/:id" element={<ModelSetupPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AppShell>
+    </ImportProvider>
   )
 }
