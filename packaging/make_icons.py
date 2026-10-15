@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 # galleriaDelVento -- real-time 2D wind tunnel for sections, sketches and profiles
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Draw the application icons: placeholders, until the program has a face.
+"""Draw the application icons: an airfoil in a stream, on a dark plate.
 
-A rounded plate with the initial of the name. Good enough for the menu and the
-dock on day one; replace the drawing with a real one when the program deserves
-it, keeping the file names -- install.sh and the interface look for exactly
-these:
+One geometry, computed here, feeds both the SVG and the PNGs (drawn with
+Pillow at 4x and scaled down), so the two never disagree. File names are what
+install.sh and the interface look for:
 
 * ``packaging/icons/galleriadelvento-{48,128,256}.png`` and ``galleriadelvento.svg`` for
   the desktop (hicolor theme);
@@ -21,15 +20,15 @@ Run with ``uv run python packaging/make_icons.py``.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 APP_ID = "galleriadelvento"
-INITIAL = "galleriaDelVento"[:1].upper()
-PLATE = "#1d2433"
-ACCENT = "#7aa2f7"
-INK = "#f5f5f5"
+PLATE = "#161c28"
+STREAM = "#7aa2f7"
+BODY = "#f2f4f8"
 
 ROOT = Path(__file__).resolve().parent.parent
 DESKTOP = ROOT / "packaging" / "icons"
@@ -39,18 +38,92 @@ WEB = (
     else ROOT / "backend" / "gdv" / "static" / "icons"
 )
 
-FONT_CANDIDATES = (
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf",
-    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-)
+# Geometry in a 512 x 512 box.
+SIZE = 512
+PLATE_INSET, PLATE_RADIUS = 31, 99
+CHORD, THICKNESS, INCIDENCE_DEG = 290.0, 0.19, 8.0
+CENTRE = (262.0, 258.0)
+STREAM_WIDTH = 17.0
+#: (offset from the centre line, opacity): the outer lines are fainter.
+STREAMS = ((-122.0, 0.5), (-64.0, 1.0), (64.0, 1.0), (122.0, 0.5))
+X_START, X_END = 100.0, 424.0
 
 
-def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    for candidate in FONT_CANDIDATES:
-        if Path(candidate).is_file():
-            return ImageFont.truetype(candidate, size)
-    return ImageFont.load_default(size)
+def airfoil() -> list[tuple[float, float]]:
+    """A thick symmetric NACA-style section, nose up, closed (screen coordinates)."""
+    n = 48
+    upper, lower = [], []
+    for i in range(n + 1):
+        beta = math.pi * i / n
+        x = (1 - math.cos(beta)) / 2  # cosine spacing: round nose
+        t = (
+            5
+            * THICKNESS
+            * (
+                0.2969 * math.sqrt(x)
+                - 0.1260 * x
+                - 0.3516 * x**2
+                + 0.2843 * x**3
+                - 0.1036 * x**4  # closed trailing edge
+            )
+        )
+        upper.append((x, -t))
+        lower.append((x, t))
+    points = upper + lower[::-1][1:-1]
+    a = math.radians(INCIDENCE_DEG)
+    out = []
+    for x, y in points:
+        px, py = (x - 0.42) * CHORD, y * CHORD
+        out.append(
+            (
+                CENTRE[0] + px * math.cos(a) - py * math.sin(a),
+                CENTRE[1] + px * math.sin(a) + py * math.cos(a),
+            )
+        )
+    return out
+
+
+def streamline(offset: float) -> list[tuple[float, float]]:
+    """A line of the stream, pushed away from the body near it (more above: lift)."""
+    side = -1.0 if offset < 0 else 1.0
+    strength = (44.0 if offset < 0 else 22.0) * math.exp(-(abs(offset) - 64.0) / 100.0)
+    points = []
+    steps = 64
+    for i in range(steps + 1):
+        x = X_START + (X_END - X_START) * i / steps
+        # Widest where the section is thickest, about 30% of the chord.
+        bump = math.exp(-(((x - (CENTRE[0] - 0.12 * CHORD)) / 95.0) ** 2))
+        # The stream rises ahead of the nose and comes down behind the tail.
+        upwash = -12.0 * math.tanh((CENTRE[0] - x) / 90.0) - 4.0
+        points.append((x, CENTRE[1] + offset + side * strength * bump + upwash))
+    return points
+
+
+def _path(points: list[tuple[float, float]], closed: bool) -> str:
+    head = f"M{points[0][0]:.1f} {points[0][1]:.1f}"
+    body = " ".join(f"L{x:.1f} {y:.1f}" for x, y in points[1:])
+    return f"{head} {body}{' Z' if closed else ''}"
+
+
+def svg() -> str:
+    lines = "\n".join(
+        f'  <path d="{_path(streamline(o), False)}" fill="none" stroke="{STREAM}" '
+        f'stroke-width="{STREAM_WIDTH}" stroke-linecap="round" stroke-linejoin="round" '
+        f'opacity="{alpha}"/>'
+        for o, alpha in STREAMS
+    )
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {SIZE} {SIZE}">
+  <rect x="{PLATE_INSET}" y="{PLATE_INSET}" width="{SIZE - 2 * PLATE_INSET}"
+        height="{SIZE - 2 * PLATE_INSET}" rx="{PLATE_RADIUS}" fill="{PLATE}"/>
+{lines}
+  <path d="{_path(airfoil(), True)}" fill="{BODY}"/>
+</svg>
+"""
+
+
+def _rgba(colour: str, alpha: float = 1.0) -> tuple[int, int, int, int]:
+    c = colour.lstrip("#")
+    return int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16), round(255 * alpha)
 
 
 def draw(size: int, *, maskable: bool = False) -> Image.Image:
@@ -60,33 +133,31 @@ def draw(size: int, *, maskable: bool = False) -> Image.Image:
     pen = ImageDraw.Draw(image)
     if maskable:
         pen.rectangle((0, 0, big, big), fill=PLATE)
-        scale, offset = 0.8, big * 0.1
+        k, shift = 0.8 * big / SIZE, big * 0.1
     else:
-        scale, offset = 1.0, 0.0
-    inset = offset + big * 0.06 * scale
-    side = big - 2 * inset
-    if not maskable:
-        pen.rounded_rectangle((inset, inset, inset + side, inset + side), radius=side * 0.22, fill=PLATE)
-    bar = side * 0.07
-    pen.rounded_rectangle(
-        (inset + side * 0.2, inset + side * 0.78, inset + side * 0.8, inset + side * 0.78 + bar),
-        radius=bar / 2,
-        fill=ACCENT,
-    )
-    font = _font(int(side * 0.52))
-    pen.text((big / 2, inset + side * 0.46), INITIAL, font=font, fill=INK, anchor="mm")
+        k, shift = big / SIZE, 0.0
+        inset, end = PLATE_INSET * k, (SIZE - PLATE_INSET) * k
+        pen.rounded_rectangle((inset, inset, end, end), radius=PLATE_RADIUS * k, fill=PLATE)
+
+    def tx(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        return [(x * k + shift, y * k + shift) for x, y in points]
+
+    width = STREAM_WIDTH * k
+    for offset, alpha in STREAMS:
+        layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        lp = ImageDraw.Draw(layer)
+        points = tx(streamline(offset))
+        colour = _rgba(STREAM)
+        lp.line(points, fill=colour, width=round(width), joint="curve")
+        for x, y in (points[0], points[-1]):
+            r = width / 2
+            lp.ellipse((x - r, y - r, x + r, y + r), fill=colour)
+        if alpha < 1:
+            layer.putalpha(layer.getchannel("A").point(lambda v, a=alpha: round(v * a)))
+        image.alpha_composite(layer)
+    pen = ImageDraw.Draw(image)
+    pen.polygon(tx(airfoil()), fill=BODY)
     return image.resize((size, size), Image.Resampling.LANCZOS)
-
-
-def svg() -> str:
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect x="31" y="31" width="450" height="450" rx="99" fill="{PLATE}"/>
-  <rect x="121" y="382" width="270" height="32" rx="16" fill="{ACCENT}"/>
-  <text x="256" y="238" font-family="DejaVu Sans, Ubuntu, Liberation Sans, sans-serif"
-        font-weight="700" font-size="234" fill="{INK}" text-anchor="middle"
-        dominant-baseline="central">{INITIAL}</text>
-</svg>
-"""
 
 
 def main() -> None:
