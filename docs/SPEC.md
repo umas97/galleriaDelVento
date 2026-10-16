@@ -541,7 +541,9 @@ alla foto e ogni parametro regolabile.
 
 ### 8.1 Ingresso
 
-- **JPEG, PNG, WebP** fino a 40 MB; orientamento EXIF rispettato. (HEIC: vedi §22.)
+- **JPEG, PNG, WebP** fino a 40 MB; orientamento EXIF rispettato. **HEIC non supportato** in v1
+  (decisione dell'utente, 2026-10-16): un file HEIC dà «Le foto HEIC non sono supportate: salvala
+  o esportala in JPEG dal telefono».
 - Elaborazione su una copia ridotta a **2000 px** sul lato lungo; la foto è copiata in libreria
   (§2.1) e mai modificata.
 
@@ -1276,7 +1278,8 @@ licenza prima di aggiungerla.
 
 ## 22. Punti aperti
 
-- **HEIC** (foto da iPhone): servirebbe `pillow-heif` (libheif è LGPL). Da decidere in Fase 4.
+- **HEIC** (foto da iPhone): servirebbe `pillow-heif` (libheif è LGPL). Escluso dalla v1
+  (decisione dell'utente, 2026-10-16), da rivalutare.
 - **Condizioni al contorno interpolate (Bouzidi)**: non servono, i test 22–24 passano con il
   rimbalzo a metà via (Fase 3).
 - **Turbolenza in ingresso** (intensità regolabile) per edifici e veicoli.

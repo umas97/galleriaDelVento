@@ -30,6 +30,7 @@ import numpy as np
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .placement import Placement
+from .sketch.params import SketchParams
 
 __all__ = [
     "MAX_LOOPS",
@@ -140,11 +141,12 @@ class DrawingSource(BaseModel):
 
 
 class PhotoSource(BaseModel):
-    """A photographed sketch (SPEC §8); the parameters are filled in Phase 4."""
+    """A photographed sketch (SPEC §8): the photo and every setting of the four steps."""
 
     kind: Literal["photo"] = "photo"
     sha256: str
-    params: dict[str, Any] = {}
+    file_name: str
+    params: SketchParams
 
 
 OriginSource = Annotated[Section3DSource | DrawingSource | PhotoSource, Field(discriminator="kind")]

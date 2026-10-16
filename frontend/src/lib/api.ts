@@ -18,6 +18,10 @@ import type {
   ProfileDraft,
   ProfileEnvelope,
   ProfileSummary,
+  SketchInfo,
+  SketchParams,
+  SketchPreview,
+  SketchStage,
   StudyTypePreset,
 } from './types'
 
@@ -154,6 +158,21 @@ export const api = {
     uploadBytes<DrawingInfo>(`/api/drawings/import?nome=${encodeURIComponent(file.name)}`, file, onProgress),
   drawingDraft: (id: string, scale: number, name: string) =>
     request<CheckResult>(`/api/drawings/${id}/draft`, { method: 'POST', body: json({ scale, name }) }),
+
+  importSketch: (file: File, onProgress?: (f: number) => void) =>
+    uploadBytes<SketchInfo>(`/api/sketches/import?nome=${encodeURIComponent(file.name)}`, file, onProgress),
+  sketch: (id: string) => request<SketchInfo>(`/api/sketches/${id}`),
+  sketchPreview: (id: string, params: SketchParams, stage: SketchStage, name: string, signal?: AbortSignal) =>
+    request<SketchPreview>(`/api/sketches/${id}/preview`, {
+      method: 'POST',
+      body: json({ params, stage, name }),
+      signal,
+    }),
+  sketchDraft: (id: string, params: SketchParams, name: string) =>
+    request<CheckResult>(`/api/sketches/${id}/draft`, { method: 'POST', body: json({ params, name }) }),
+  sketchPhotoUrl: (id: string) => `/api/sketches/${id}/photo.jpg`,
+  sketchSheetUrl: (id: string, corners: readonly (readonly [number, number])[] | null) =>
+    `/api/sketches/${id}/sheet.jpg${corners ? `?corners=${corners.flat().map((v) => v.toFixed(5)).join(',')}` : ''}`,
 }
 
 /**

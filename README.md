@@ -94,10 +94,11 @@ backend/gdv/
   safety.py          the write guard: nothing is written outside the app's folders
   errors.py          errors for the user (Italian message + technical details)
   api/               FastAPI routers, one per area
-  library/           the on-disk library: models, 2D profiles, imported drawings
+  library/           the on-disk library: models, 2D profiles, imported drawings, sketch photos
   geometry/          STL/OBJ import and repairs, placement, binary mesh format; the Profile2D
                      contract, its validation and repair; SVG/DXF import, DXF/SVG export;
-                     raster2d.py, the reference mask of the solver
+                     raster2d.py, the reference mask of the solver; sketch/, the photo of a
+                     hand sketch -> profile (sheet, thresholding, outline; OpenCV)
   physics/           fluid properties and the planner (CaseSetup -> CasePlan)
   lattice.py         D2Q9 constants and MRT matrices, the single source of the shader's ones
   static/            the interface served by the server (built from frontend/)
@@ -107,6 +108,7 @@ frontend/src/
   tunnel/            the tunnel screen (conditions, results, top bar)
   charts/            uPlot charts (coefficient history, Cp on the contour, probes)
   section/           live sections: the slicer and its Web Worker
+  sketch/            the sketch wizard's pieces: image overlay, previews, click geometry
   profile/           2D geometry: validation, repair (Clipper2), splines, fitting, measures
   editor/            the profile editor's document (undo/redo, symmetric mode) and canvas
   scene3d/           three.js / react-three-fiber scene of a model
@@ -122,7 +124,8 @@ docs/SPEC.md         the specification
 
 User files are never modified: imports are uploads (the backend receives bytes, never a path),
 the library keeps an untouched copy (`originale.*` for models, `disegni/<sha>.svg|dxf` for
-drawings) and writes only derived files next to it. Exports are browser downloads.
+drawings, `foto/<sha>.jpg|png|webp` for sketch photos) and writes only derived files next to
+it. Exports are browser downloads.
 
 ## Dependencies
 
@@ -132,13 +135,14 @@ All permissive licences, compatible with GPL-3.0-or-later.
 |---|---|---|
 | fastapi, uvicorn | MIT, BSD-3 | local HTTP server (scaffold) |
 | numpy | BSD-3 | all mesh arithmetic |
-| scipy | BSD-3 | sparse graphs (components, normal orientation), later splines |
+| scipy | BSD-3 | sparse graphs (components, normal orientation, the ends of an open stroke), smoothing splines of sketch outlines |
 | trimesh | MIT | ASCII STL and OBJ parsing (binary STL is read directly with numpy) |
 | fast-simplification | MIT | decimated view mesh above 500k triangles |
 | python-multipart | Apache-2.0 | listed in the SPEC for uploads; mesh uploads stream the raw body |
 | shapely | BSD-3 | validity of 2D profiles, and their repair (`make_valid` + union) after confirmation |
 | svgelements | MIT | SVG import with transforms, viewBox and physical units |
 | ezdxf | MIT | DXF import (entities, blocks, `$INSUNITS`) and DXF export |
+| opencv-python-headless | Apache-2.0 | photographed sketches: decoding with EXIF orientation, sheet detection, perspective, adaptive threshold, distance transforms; imported only when a photo is processed |
 | react, react-router, @tanstack/react-query | MIT | interface (scaffold) |
 | three, @react-three/fiber, @react-three/drei | MIT | 3D scene of the model |
 | zustand | MIT | screen state |
@@ -147,6 +151,10 @@ All permissive licences, compatible with GPL-3.0-or-later.
 | uplot | MIT | live charts: coefficient history, Cp along the contour, probes |
 | playwright-core | Apache-2.0 | browser tests with the system Chrome (development only) |
 | numba | BSD-2 | the CPU reference solver the shader is checked against (tests only) |
+| pillow | MIT-CMU | draws the icons; writes EXIF-rotated photos in the tests (development only) |
+
+Photos in HEIC (iPhone) are not supported: they get a message asking for a JPEG. Reading
+them would need `pillow-heif` and libheif (LGPL), left out of v1.
 
 drei components that download assets at runtime (environment maps, GPU detection) are never
 used: the page's Content-Security-Policy would block them anyway.

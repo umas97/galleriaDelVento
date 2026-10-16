@@ -29,11 +29,11 @@ router = APIRouter(prefix="/api", tags=["models"])
 _NO_STORE = {"Cache-Control": "no-cache, no-store, must-revalidate"}
 
 
-def too_big(size: int) -> AppError:
-    mb = MAX_UPLOAD_BYTES // (1024 * 1024)
+def too_big(size: int, limit: int = MAX_UPLOAD_BYTES) -> AppError:
+    mb = limit // (1024 * 1024)
     return AppError(
         f"Il file supera il limite di {mb} MB",
-        f"{size} byte, limite {MAX_UPLOAD_BYTES}",
+        f"{size} byte, limite {limit}",
         status=413,
     )
 
@@ -41,12 +41,12 @@ def too_big(size: int) -> AppError:
 async def read_limited_body(request: Request, limit: int = MAX_UPLOAD_BYTES) -> bytearray:
     declared = request.headers.get("content-length")
     if declared is not None and declared.isdigit() and int(declared) > limit:
-        raise too_big(int(declared))
+        raise too_big(int(declared), limit)
     body = bytearray()
     async for chunk in request.stream():
         body += chunk
         if len(body) > limit:
-            raise too_big(len(body))
+            raise too_big(len(body), limit)
     if not body:
         raise AppError("Il file è vuoto", "corpo della richiesta vuoto")
     return body

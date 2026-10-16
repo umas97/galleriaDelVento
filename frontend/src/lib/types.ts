@@ -147,10 +147,28 @@ export type DrawingSource = {
   units: string | null
 }
 
+// The settings of the four steps of a photographed sketch (SPEC §8).
+// Mirrors backend/gdv/geometry/sketch/params.py; test 5 compares them.
+export type SketchParams = {
+  corners: Point2[] | null
+  threshold: number
+  closing: number
+  smoothing: number
+  regions: Point2[]
+  close_open: boolean
+  wind_deg: number
+  flip: boolean
+  scale_mode: 'length' | 'points'
+  length_m: number | null
+  points: Point2[] | null
+  distance_m: number | null
+}
+
 export type PhotoSource = {
   kind: 'photo'
   sha256: string
-  params: Record<string, unknown>
+  file_name: string
+  params: SketchParams
 }
 
 export type EditorSource = {
@@ -233,6 +251,41 @@ export type DrawingInfo = {
   metres_per_unit: number | null
   extent: [number, number]
   preview: Point2[][]
+}
+
+// --- the photographed sketch (SPEC §8) ----------------------------------------------
+
+export type SketchInfo = {
+  id: string
+  file_name: string
+  format: 'jpg' | 'png' | 'webp'
+  sha256: string
+}
+
+export type SketchStage = 'sheet' | 'ink' | 'outline' | 'profile'
+
+export type SketchRegion = {
+  seed: Point2
+  fraction: number
+  selected: boolean
+  outline: Point2[]
+}
+
+export type SketchGap = { a: Point2; b: Point2; fraction: number }
+
+export type SketchPreview = {
+  params: SketchParams
+  photo_size: [number, number]
+  sheet_found: boolean
+  sheet_size: [number, number]
+  standard_sheet: boolean
+  ink: string | null
+  regions: SketchRegion[] | null
+  gap: SketchGap | null
+  joined: Point2[] | null
+  draft: ProfileDraft | null
+  size_m: [number, number] | null
+  elapsed_ms: number
 }
 
 // --- cases (SPEC §9): CaseSetup → CasePlan ------------------------------------------

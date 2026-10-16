@@ -163,3 +163,194 @@ def naca4(code: str = "0012", n: int = 100, chord: float = 1.0) -> np.ndarray:
     upper = np.stack([xu, yu], 1)[::-1]  # TE -> LE
     lower = np.stack([xl, yl], 1)[1:-1]  # LE -> TE, both ends excluded
     return np.concatenate([upper, lower]) * chord
+
+
+# --- photographed sketches (SPEC §8, tests 13-16) --------------------------------------
+
+#: The drawn sheet before it is photographed: A4 landscape at about 5 px/mm.
+SHEET_PX = (1400, 990)
+
+
+def on_sheet(loop: np.ndarray, *, centre=(0.5, 0.5), width=0.6) -> np.ndarray:
+    """``loop`` (metres, y up) placed on the sheet: its x extent is ``width`` of the
+    sheet's width, its box centred at ``centre`` (fractions); sheet pixels, y down."""
+    lo, hi = loop.min(axis=0), loop.max(axis=0)
+    scale = width * SHEET_PX[0] / (hi[0] - lo[0])
+    mid = (lo + hi) / 2
+    out = (loop - mid) * scale * np.array([1.0, -1.0])
+    return out + np.array([centre[0] * SHEET_PX[0], centre[1] * SHEET_PX[1]])
+
+
+def ellipse(rx: float, ry: float, n: int = 400) -> np.ndarray:
+    a = np.linspace(0, 2 * np.pi, n, endpoint=False)
+    return np.stack([rx * np.cos(a), ry * np.sin(a)], 1)
+
+
+def _densify(points: np.ndarray, closed: bool) -> np.ndarray:
+    p = np.concatenate([points, points[:1]]) if closed else points
+    out = [p[0]]
+    for a, b in zip(p[:-1], p[1:], strict=True):
+        n = max(1, int(np.ceil(np.hypot(*(b - a)))))
+        out.extend(a + (b - a) * (np.arange(1, n + 1)[:, None] / n))
+    return np.array(out)
+
+
+def _wobble(
+    rng: np.random.Generator,
+    n: int,
+    waves: int,
+    cycles: tuple[float, float] = (2, 14),
+    periodic: bool = False,
+) -> np.ndarray:
+    """A smooth random signal in [-1, 1] along ``n`` samples: ``waves`` sinusoids
+    of ``cycles`` periods over the whole length (whole periods if ``periodic``,
+    so that a closed stroke ends where it began)."""
+    s = np.linspace(0, 2 * np.pi, n)
+    total = np.zeros(n)
+    for _ in range(waves):
+        freq = rng.uniform(*cycles)
+        if periodic:
+            freq = max(1, round(freq))
+        total += np.sin(freq * s + rng.uniform(0, 2 * np.pi)) / waves
+    return total / max(1e-9, np.abs(total).max())
+
+
+def draw_strokes(
+    strokes: list[tuple[np.ndarray, bool]],
+    rng: np.random.Generator,
+    *,
+    thickness: tuple[float, float] = (3.0, 6.0),
+    tremor: float = 0.004,
+    paper_rgb: tuple[int, int, int] = (205, 220, 228),
+    drawn_lines: list[np.ndarray] | None = None,
+) -> np.ndarray:
+    """The sheet (BGR) with hand-drawn strokes: irregular width, a hand tremor
+    along the normal of at most ``tremor`` of the stroke's size (waves 2-8% of
+    its length long, as a hand drawing at a few cm/s), a slightly uneven ink.
+    The lines actually drawn, tremor included, go into ``drawn_lines``."""
+    import cv2
+
+    w, h = SHEET_PX
+    sheet = np.empty((h, w, 3), np.float32)
+    sheet[:] = paper_rgb
+    sheet += rng.normal(0, 2.5, sheet.shape)
+    sheet = np.clip(sheet, 0, 255).astype(np.uint8)
+    for points, closed in strokes:
+        dense = _densify(np.asarray(points, np.float64), closed)
+        size = float((dense.max(axis=0) - dense.min(axis=0)).max())
+        tangent = np.gradient(dense, axis=0)
+        normal = np.stack([-tangent[:, 1], tangent[:, 0]], 1)
+        normal /= np.maximum(1e-9, np.hypot(*normal.T))[:, None]
+        n = len(dense)
+        length = float(np.hypot(*np.diff(dense, axis=0).T).sum())
+        cycles = (length / (0.08 * size), length / (0.02 * size))
+        wobble = _wobble(rng, n, 4, cycles, periodic=closed)
+        drawn = dense + normal * (wobble * tremor * size)[:, None]
+        if drawn_lines is not None:
+            drawn_lines.append(drawn)
+        lo, hi = thickness
+        width = lo + (hi - lo) * (0.5 + 0.5 * _wobble(rng, n, 3))
+        ink = rng.integers(25, 70)
+        for k in range(0, n - 1, 2):
+            a, b = drawn[k], drawn[min(k + 2, n - 1)]
+            colour = tuple(int(ink + rng.integers(-8, 9)) for _ in range(3))
+            cv2.line(
+                sheet,
+                (int(round(a[0] * 16)), int(round(a[1] * 16))),
+                (int(round(b[0] * 16)), int(round(b[1] * 16))),
+                colour,
+                max(1, int(round(width[k]))),
+                cv2.LINE_AA,
+                shift=4,
+            )
+    return sheet
+
+
+def camera_homography(
+    sheet_size: tuple[int, int],
+    photo: tuple[int, int],
+    rng: np.random.Generator,
+    *,
+    tilt_deg: float = 25.0,
+    fill: float = 0.7,
+) -> np.ndarray:
+    """Sheet pixels → photo pixels for a phone held above the sheet: a pinhole
+    camera (focal 0.8 × width, principal point at the centre), tilted up to
+    ``tilt_deg`` about both axes and turned freely, the sheet filling about
+    ``fill`` of the photo's width."""
+    sw, sh = sheet_size
+    pw, ph = photo
+    f = 0.8 * pw
+    a, b = np.radians(rng.uniform(-tilt_deg, tilt_deg, 2))
+    c = rng.uniform(-0.3, 0.3)
+    rx = np.array([[1, 0, 0], [0, np.cos(a), -np.sin(a)], [0, np.sin(a), np.cos(a)]])
+    ry = np.array([[np.cos(b), 0, np.sin(b)], [0, 1, 0], [-np.sin(b), 0, np.cos(b)]])
+    rz = np.array([[np.cos(c), -np.sin(c), 0], [np.sin(c), np.cos(c), 0], [0, 0, 1]])
+    rot = rz @ rx @ ry
+    distance = f * sw / (fill * pw)
+    shift = rng.uniform(-0.05, 0.05, 2) * distance
+    t = np.array([shift[0], shift[1], distance])
+    k = np.array([[f, 0, (pw - 1) / 2], [0, f, (ph - 1) / 2], [0, 0, 1]])
+    centre = np.array([[1, 0, -sw / 2], [0, 1, -sh / 2], [0, 0, 1]])
+    matrix = k @ np.column_stack([rot[:, 0], rot[:, 1], t]) @ centre
+    return matrix / matrix[2, 2]
+
+
+def photograph(
+    sheet: np.ndarray,
+    rng: np.random.Generator,
+    *,
+    photo: tuple[int, int] = (2400, 1800),
+    table_rgb: tuple[int, int, int] = (70, 85, 105),
+    tilt_deg: float = 25.0,
+    shadow: float = 0.45,
+    quality: int = 80,
+) -> tuple[bytes, np.ndarray]:
+    """Lay the sheet on a table and take a phone photo: a camera homography, a
+    shadow gradient, noise, JPEG. Returns the JPEG and the sheet's corners in it."""
+    import cv2
+
+    pw, ph = photo
+    sh, sw = sheet.shape[:2]
+    matrix = camera_homography((sw, sh), photo, rng, tilt_deg=tilt_deg)
+    src = np.array([[0, 0], [sw, 0], [sw, sh], [0, sh]], np.float64)
+    dst = cv2.perspectiveTransform(src[None].astype(np.float64), matrix)[0]
+    table = np.empty((ph, pw, 3), np.float32)
+    table[:] = table_rgb
+    table += rng.normal(0, 6, table.shape)
+    image = np.clip(table, 0, 255).astype(np.uint8)
+    transparent = cv2.BORDER_TRANSPARENT
+    cv2.warpPerspective(sheet, matrix, (pw, ph), dst=image, borderMode=transparent)
+    yy, xx = np.mgrid[0:ph, 0:pw].astype(np.float32)
+    direction = rng.uniform(0, 2 * np.pi)
+    ramp = (np.cos(direction) * xx / pw + np.sin(direction) * yy / ph + 1) / 2
+    light = 1 - shadow * np.clip(ramp, 0, 1)
+    image = image.astype(np.float32) * light[..., None] + rng.normal(0, 3, image.shape)
+    image = np.clip(image, 0, 255).astype(np.uint8)
+    ok, data = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, quality])
+    assert ok
+    return data.tobytes(), dst
+
+
+def sketch_photo(
+    strokes: list[tuple[np.ndarray, bool]], seed: int = 0, **photo_options
+) -> tuple[bytes, np.ndarray]:
+    """Strokes in sheet pixels drawn by hand and photographed (see the two steps above)."""
+    rng = np.random.default_rng(seed)
+    return photograph(draw_strokes(strokes, rng), rng, **photo_options)
+
+
+def open_ellipse(gap: float, *, centre=(0.5, 0.5), rx=0.3) -> tuple[np.ndarray, np.ndarray]:
+    """An ellipse on the sheet with a gap of ``gap`` × sheet width at its right end.
+
+    Returns the open polyline and the middle of the gap (sheet pixels).
+    """
+    r = rx * SHEET_PX[0]
+    loop = ellipse(r, r * 0.55, 2000) + np.array([centre[0] * SHEET_PX[0], centre[1] * SHEET_PX[1]])
+    half_angle = np.arcsin(min(1.0, gap * SHEET_PX[0] / 2 / (r * 0.55)))
+    a = np.linspace(0, 2 * np.pi, 2000, endpoint=False)
+    keep = np.abs(np.angle(np.exp(1j * a))) > half_angle
+    start = int(np.argmax(keep & ~np.roll(keep, 1)))
+    ordered = np.roll(np.arange(len(a)), -start)
+    ordered = ordered[keep[ordered]]
+    return loop[ordered], loop[0]

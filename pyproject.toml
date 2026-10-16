@@ -11,6 +11,7 @@ dependencies = [
     "fast-simplification>=0.2.0",
     "fastapi>=0.115",
     "numpy>=2.5.4",
+    "opencv-python-headless>=5.0.0.93",
     "python-multipart>=0.0.32",
     "scipy>=1.18.1",
     "shapely>=2.2.0",

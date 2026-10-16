@@ -33,12 +33,13 @@ from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from . import __version__
-from .api import routes_cases, routes_models, routes_profiles
+from .api import routes_cases, routes_models, routes_profiles, routes_sketch
 from .config import APP_ID, APP_NAME, WINDOW_PATH
 from .controls import AppControls
 from .errors import AppError
 from .library.drawings import DrawingStore
 from .library.models import ModelStore
+from .library.photos import PhotoStore
 from .library.profiles import ProfileStore
 from .safety import UnsafeWriteError
 from .security import BAD_TOKEN, TOKEN_HEADER, needs_token, refusal, token_matches
@@ -145,6 +146,7 @@ def create_app(controls: AppControls | None = None, static_dir: Path | None = No
     app.state.models = ModelStore()
     app.state.profiles = ProfileStore()
     app.state.drawings = DrawingStore()
+    app.state.photos = PhotoStore()
 
     @app.get("/api/health", tags=["app"])
     def health() -> dict[str, Any]:
@@ -188,6 +190,7 @@ def create_app(controls: AppControls | None = None, static_dir: Path | None = No
     app.include_router(routes_models.router)
     app.include_router(routes_profiles.router)
     app.include_router(routes_cases.router)
+    app.include_router(routes_sketch.router)
 
     @app.exception_handler(AppError)
     async def _app_error(_request: Request, exc: AppError) -> JSONResponse:

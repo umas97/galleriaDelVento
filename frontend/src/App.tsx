@@ -12,6 +12,7 @@ import { LibraryPage } from './pages/Library'
 import { ModelSetupPage } from './pages/ModelSetup'
 import { ProfileEditorPage } from './pages/ProfileEditor'
 import { SectionPage } from './pages/Section'
+import { SketchWizardPage } from './pages/SketchWizard'
 import { TunnelPage } from './pages/Tunnel'
 
 export function App() {
@@ -24,6 +25,7 @@ export function App() {
           <Route path="/modelli/:id/sezioni" element={<SectionPage />} />
           <Route path="/profili/nuovo" element={<ProfileEditorPage />} />
           <Route path="/profili/:id" element={<ProfileEditorPage />} />
+          <Route path="/schizzi/:id" element={<SketchWizardPage />} />
           <Route path="/galleria/:kind/:id" element={<TunnelPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

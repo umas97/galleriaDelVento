@@ -37,7 +37,7 @@ import {
 import { EditorCanvas, type Tool } from '../editor/EditorCanvas'
 import { api } from '../lib/api'
 import { isTextField, metres, num, parseDecimal } from '../lib/format'
-import type { EditorSource, Profile2D, ProfileSource } from '../lib/types'
+import type { EditorSource, PhotoSource, Profile2D, ProfileSource } from '../lib/types'
 import { boxOf, type Pt } from '../profile/geometry'
 import { DEFAULT_CONTROL_POINTS } from '../profile/fit'
 import { profileMetrics } from '../profile/metrics'
@@ -64,6 +64,13 @@ function derivedSource(original: Profile2D | null): EditorSource {
   if (!original) return { kind: 'editor', derived_from: null, origin: null }
   const s = original.source
   return { kind: 'editor', derived_from: original.id, origin: s.kind === 'editor' ? s.origin : s }
+}
+
+/** The photographed sketch a profile comes from, directly or through edits. */
+function photoOrigin(source: ProfileSource): PhotoSource | null {
+  if (source.kind === 'photo') return source
+  if (source.kind === 'editor' && source.origin?.kind === 'photo') return source.origin
+  return null
 }
 
 /** «Salva»: the same profile, now edited; an imported one keeps its origin. */
@@ -194,6 +201,8 @@ function Editor({ original, readOnly }: { original: Profile2D | null; readOnly: 
   const exportAs = (format: 'svg' | 'dxf') => {
     void api.exportDraft(docToDraft(doc, name, derivedSource(original)), format)
   }
+
+  const photo = original ? photoOrigin(original.source) : null
 
   const goBack = (to: string) => {
     if (dirty) setLeaving(to)
@@ -406,6 +415,15 @@ function Editor({ original, readOnly }: { original: Profile2D | null; readOnly: 
             <dd>{metres(metrics.perimeter)}</dd>
           </dl>
         </Panel>
+
+        {photo ? (
+          <Panel title={t('editor.origin')}>
+            <p className="text-ink-200">{t('editor.origin.photo', { file: photo.file_name })}</p>
+            <Button onClick={() => goBack(`/schizzi/${photo.sha256.slice(0, 16)}?profilo=${original!.id}`)}>
+              {t('editor.reopenSketch')}
+            </Button>
+          </Panel>
+        ) : null}
 
         <Panel title={t('editor.export')}>
           <div className="flex flex-wrap gap-2">

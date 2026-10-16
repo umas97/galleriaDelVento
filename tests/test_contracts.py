@@ -21,6 +21,7 @@ import pytest
 from pydantic import BaseModel
 
 from gdv.geometry import profile
+from gdv.geometry.sketch import params as sketch_params
 from gdv.physics import fluids, planner
 
 TYPES_TS = Path(__file__).resolve().parents[1] / "frontend" / "src" / "lib" / "types.ts"
@@ -31,6 +32,7 @@ CONTRACTS: list[type[BaseModel]] = [
     profile.SplineData,
     profile.Section3DSource,
     profile.DrawingSource,
+    sketch_params.SketchParams,
     profile.PhotoSource,
     profile.EditorSource,
     profile.ProfileDraft,

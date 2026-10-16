@@ -11,7 +11,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { sniffFile, type FileKind } from '../lib/sniff'
 import type { DrawingInfo, ModelRecord } from '../lib/types'
-import { t } from '../i18n/it'
+import { t, type MessageKey } from '../i18n/it'
 import { Button, Dialog } from './Dialog'
 import { DrawingImportDialog } from './DrawingImport'
 import { ErrorNotice } from './ErrorNotice'
@@ -24,13 +24,20 @@ export const useImport = () => useContext(ImportContext)
 
 type State =
   | { step: 'idle' }
-  | { step: 'uploading'; name: string; progress: number }
+  | { step: 'uploading'; name: string; progress: number; kind: FileKind }
   | { step: 'exists'; model: ModelRecord }
   | { step: 'drawing'; info: DrawingInfo }
   | { step: 'unsupported'; name: string; kind: FileKind }
   | { step: 'error'; name: string; error: unknown }
 
 const ACCEPT = '.stl,.obj,.svg,.dxf,.jpg,.jpeg,.png,.webp'
+
+const ANALYSING: Partial<Record<FileKind, MessageKey>> = {
+  mesh: 'import.analysing',
+  svg: 'import.drawing.analysing',
+  dxf: 'import.drawing.analysing',
+  image: 'import.photo.analysing',
+}
 
 export function ImportProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<State>({ step: 'idle' })
@@ -42,10 +49,21 @@ export function ImportProvider({ children }: { children: ReactNode }) {
   const importFile = useCallback(
     async (file: File) => {
       const kind = await sniffFile(file)
-      if (kind === 'svg' || kind === 'dxf') {
-        setState({ step: 'uploading', name: file.name, progress: 0 })
+      if (kind === 'image') {
+        setState({ step: 'uploading', name: file.name, progress: 0, kind })
         try {
-          const info = await api.importDrawing(file, (progress) => setState({ step: 'uploading', name: file.name, progress }))
+          const info = await api.importSketch(file, (progress) => setState({ step: 'uploading', name: file.name, progress, kind }))
+          setState({ step: 'idle' })
+          navigate(`/schizzi/${info.id}`)
+        } catch (error) {
+          setState({ step: 'error', name: file.name, error })
+        }
+        return
+      }
+      if (kind === 'svg' || kind === 'dxf') {
+        setState({ step: 'uploading', name: file.name, progress: 0, kind })
+        try {
+          const info = await api.importDrawing(file, (progress) => setState({ step: 'uploading', name: file.name, progress, kind }))
           setState({ step: 'drawing', info })
         } catch (error) {
           setState({ step: 'error', name: file.name, error })
@@ -56,10 +74,10 @@ export function ImportProvider({ children }: { children: ReactNode }) {
         setState({ step: 'unsupported', name: file.name, kind })
         return
       }
-      setState({ step: 'uploading', name: file.name, progress: 0 })
+      setState({ step: 'uploading', name: file.name, progress: 0, kind })
       try {
         const result = await api.importModel(file, (progress) =>
-          setState({ step: 'uploading', name: file.name, progress }),
+          setState({ step: 'uploading', name: file.name, progress, kind }),
         )
         await queryClient.invalidateQueries({ queryKey: ['models'] })
         if (result.status === 'exists') {
@@ -143,7 +161,7 @@ export function ImportProvider({ children }: { children: ReactNode }) {
           <p className="text-ink-300">
             {state.progress < 1
               ? t('import.uploading', { percent: Math.round(state.progress * 100) })
-              : t('import.analysing')}
+              : t(ANALYSING[state.kind] ?? 'import.analysing')}
           </p>
         </Dialog>
       ) : null}
@@ -172,7 +190,7 @@ export function ImportProvider({ children }: { children: ReactNode }) {
       {state.step === 'drawing' ? <DrawingImportDialog info={state.info} onClose={close} /> : null}
       {state.step === 'unsupported' ? (
         <Dialog title={state.name} onClose={close} actions={<Button onClick={close}>{t('common.ok')}</Button>}>
-          <p>{state.kind === 'unknown' ? t('import.unknown') : t('import.notYet')}</p>
+          <p>{state.kind === 'heic' ? t('import.heic') : t('import.unknown')}</p>
         </Dialog>
       ) : null}
       {state.step === 'error' ? (

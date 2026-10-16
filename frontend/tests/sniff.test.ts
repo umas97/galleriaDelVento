@@ -31,6 +31,13 @@ describe('sniffBytes', () => {
     webp.set(enc('WEBP'), 8)
     expect(sniffBytes(webp, 16)).toBe('image')
   })
+  it('recognises HEIC photos, to say they are not supported', () => {
+    const heic = new Uint8Array(32)
+    heic.set(enc('ftypheic'), 4)
+    expect(sniffBytes(heic, 32)).toBe('heic')
+    heic.set(enc('ftypmp42'), 4) // an MP4 video is not a photo
+    expect(sniffBytes(heic, 32)).toBe('unknown')
+  })
   it('says unknown for anything else', () => {
     expect(sniffBytes(enc('hello world'), 11)).toBe('unknown')
     expect(sniffBytes(new Uint8Array(200), 200)).toBe('unknown')
