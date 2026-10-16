@@ -711,7 +711,7 @@ Input `CaseSetup`, output `CasePlan`, via `POST /api/cases/plan`. Passi:
    sulla lunghezza di riferimento; in passi vale `L_lat / U_lat`. Tutto ciò che è espresso in
    «tempi di attraversamento» (rampa, transitorio, finestre di media, tetto delle serie) usa
    questo `T_c`, non la lunghezza della camera. Questa scelta rende realistico il target di
-   5 minuti per la serie di 11 incidenze (§17).
+   7 minuti per la serie di 11 incidenze (§17).
 7. Restituisce anche: griglia, contorni, passi per la convergenza attesa, e i testi già pronti
    per l'interfaccia (es. «Re reale 4,1·10⁶ — Re simulato 2,3·10⁴»).
 
@@ -1128,7 +1128,7 @@ STATO.md.
 | Scorrimento in profondità, Normale | ≥ 30 fps | benchmark `?bench=depth` |
 | Import STL 1 M triangoli | ≤ 5 s fino alla vista | `tests/bench/bench_import.py` |
 | Pipeline schizzo (foto 2000 px) | ≤ 400 ms per aggiornamento | `tests/bench/bench_sketch.py` |
-| Serie di incidenza (11 punti, Normale) | ≤ 5 min | log della serie, profilo NACA 0012 |
+| Serie di incidenza (11 punti, Normale) | ≤ 7 min (era 5: misurati 378 s, quasi tutti i punti arrivano al tetto di 20 T_c; decisione dell'utente, 2026-10-16) | `tests/bench/series.bench.mjs`, profilo NACA 0012 |
 
 Se un target non si raggiunge, prima di cambiarlo si misura dove va il tempo e si chiede.
 
@@ -1262,7 +1262,7 @@ STATO.md.
   test 13–16; ≤ 400 ms per aggiornamento.
 - **Fase 5 — Studi, serie, confronto, export**: salvataggio studi, serie di incidenza,
   velocità e profondità, confronto, CSV/VTK/JSON/PDF. *Accettazione*: test 3 (completo),
-  27–31, 33; serie di 11 incidenze ≤ 5 min.
+  27–31, 33; serie di 11 incidenze ≤ 7 min.
 - **Fase 6 — Rifinitura**: impostazioni persistenti complete, scorciatoie e `?`, tooltip, tema
   scuro, errori dedicati, perdita del contesto WebGL, misure finali di §17, README.
   *Accettazione*: test 32, 34; tutte le misure di §17 rispettate o discusse.
