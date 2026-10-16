@@ -14,6 +14,8 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
+
 from gdv.config import APP_ID
 from gdv.window import WindowHost, find_browser, window_class
 
@@ -115,3 +117,35 @@ def test_4_the_window_argv_carries_the_offline_flags(tmp_path, xdg_home):
     ):
         assert flag in argv
     assert set(CHROME_OFFLINE_FLAGS) <= set(argv)
+    features = next(a for a in argv if a.startswith("--disable-features="))
+    disabled = set(features.split("=", 1)[1].split(","))
+    assert {
+        "AutofillServerCommunication",
+        "SafeBrowsingHashPrefixRealTimeLookups",
+        "NetworkTimeServiceQuerying",
+        "PreconnectToSearch",
+        "PreconnectToSearchDesktop",
+        "OptimizationHints",
+        "OptimizationHintsFetchingSRP",
+        "OptimizationGuideRemoteFetching",
+        "OptimizationGuideProactivePersonalizedHintsFetching",
+        "OptimizationGuideModelExecution",
+    } <= disabled
+
+
+def test_4_every_disabled_feature_exists_in_the_installed_chrome():
+    """Chrome ignores unknown feature names silently: a rename in an update would turn a
+    service back on. Each name must appear in the installed Chrome binary (SPEC §2.2)."""
+    import shutil
+
+    from gdv.window import CHROME_DISABLED_FEATURES
+
+    found = shutil.which("google-chrome") or shutil.which("google-chrome-stable")
+    if found is None:
+        pytest.skip("Google Chrome non trovato")
+    binary = Path(found).resolve().parent / "chrome"
+    if not binary.is_file():
+        pytest.skip(f"binario di Chrome non trovato accanto a {found}")
+    data = binary.read_bytes()
+    missing = [name for name in CHROME_DISABLED_FEATURES if name.encode() not in data]
+    assert missing == [], f"funzioni sconosciute a questo Chrome: {missing}"

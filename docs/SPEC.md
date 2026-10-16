@@ -105,7 +105,12 @@ soggetti**: il backend Python, il JavaScript della pagina e **il processo Chrome
   flag per flag in un commento.
   Verifica su Chrome 155 (2026-10-15, net-log dietro il proxy del test 4): servono anche
   `--disable-features=AutofillServerCommunication,SafeBrowsingHashPrefixRealTimeLookups,
-  NetworkTimeServiceQuerying,PreconnectToSearch,PreconnectToSearchDesktop`, e i servizi che
+  NetworkTimeServiceQuerying,PreconnectToSearch,PreconnectToSearchDesktop,OptimizationHints,
+  OptimizationHintsFetchingSRP,OptimizationGuideRemoteFetching,
+  OptimizationGuideProactivePersonalizedHintsFetching,OptimizationGuideModelExecution` (le
+  ultime cinque dal 2026-10-16, decisione dell'utente: una corsa completa del test 4 ha visto un
+  tentativo verso `optimizationguide-pa.googleapis.com`). Chrome ignora in silenzio i nomi che
+  non conosce: un test verifica che ognuno compaia nel binario installato. E i servizi che
   nessun flag spegne (ListAccounts, idoneità «Modalità AI», aggiornamento di componenti ed
   estensioni) si dirottano su `http://127.0.0.1:9/` con `--gaia-url`, `--google-base-url`,
   `--component-updater=url-source=…`, `--apps-gallery-update-url` (la porta 9 è nell'elenco
@@ -553,38 +558,55 @@ alla foto e ogni parametro regolabile.
   quadrilatero più grande (`approxPolyDP`) con area > 20% dell'immagine.
 - I **4 angoli** sono maniglie trascinabili. Se il foglio non si trova, partono dagli angoli
   dell'immagine.
-- Raddrizzamento con omografia; rapporto d'aspetto: se è entro il ±5% di √2 si usa quello
-  dell'A4/A3, altrimenti quello stimato dai lati.
+- Raddrizzamento con omografia; rapporto d'aspetto stimato dai quattro angoli con un modello a
+  camera stenopeica (pixel quadrati, punto principale al centro della foto; Zhang e He,
+  «Whiteboard scanning and image enhancement», 2007), che ricava anche la focale: la media dei
+  lati opposti sbaglia del 5–10% con una prospettiva forte. Senza prospettiva (parallelogramma)
+  si usano i lati. Se il rapporto è entro il ±5% di √2 si usa quello dell'A4/A3 (decisione
+  dell'utente, 2026-10-16).
 
 ### 8.3 Passo 2 — Pulizia e binarizzazione
 
 - Appiattimento dell'illuminazione: divisione per lo sfondo stimato con una sfocatura di raggio
   pari al 5% della larghezza (rimuove ombre e gradienti).
-- Soglia adattiva (gaussiana, blocco ~3% della larghezza), poi chiusura morfologica che salda i
-  varchi del tratto fino allo slider «Chiusura varchi» (default 1% della larghezza).
-- Rimozione delle macchie: componenti con area < 0,05% del foglio.
+- Soglia adattiva (gaussiana, blocco ~3% della larghezza; default: 12% più scuro dei dintorni),
+  poi rimozione delle macchie: componenti con area < 0,05% del foglio. Un margine dell'1% lungo
+  il bordo del foglio si ripulisce (angoli appena fuori dal foglio lascerebbero una cornice).
+- **Chiusura varchi** (slider, default 1% della larghezza): non è una chiusura morfologica, che
+  con un disco non salda mai due estremi sottili affacciati (servirebbe un raggio ~d²/4w, l'8%
+  del foglio per un varco del 3%). L'inchiostro si dilata di metà del valore, le regioni chiuse
+  si cercano sull'inchiostro dilatato e si fanno ricrescere dello stesso raggio fino al tratto
+  vero: sul varco il contorno si chiude con una curva dolce. L'anteprima mostra in azzurro fin
+  dove arriva la dilatazione (decisione dell'utente, 2026-10-16).
 
 ### 8.4 Passo 3 — Contorno
 
 - Il tratto è una linea, non una sagoma piena: si **riempie la regione racchiusa** (flood fill
-  dall'esterno; l'interno è ciò che non viene raggiunto), si prende il bordo della regione e lo
-  si sposta verso l'esterno di **mezzo spessore del tratto** (stimato con la trasformata
-  distanza), così il profilo cade sulla linea mediana del tratto.
+  dall'esterno; l'interno è ciò che non viene raggiunto) e il contorno cade sulla **linea
+  mediana del tratto**: con due trasformate distanza, ogni pixel d'inchiostro va alla regione se
+  le è vicino almeno quanto alla carta esterna. Così si segue lo spessore locale (un tratto a
+  mano varia da 3 a 6 px), invece di uno spostamento costante di mezzo spessore. Dove i due
+  tratti di uno spigolo vivo si fondono (la coda di un profilo), si tiene anche l'inchiostro a
+  più di ¾ di mezzo tratto dalla carta esterna. Le sacche chiuse troppo piccole per essere
+  regioni contano come tratto.
 - Se nessuna regione chiusa supera l'1% del foglio, il tratto è aperto: si evidenziano in rosso
   gli estremi liberi più vicini con la loro distanza e si propongono «Aumenta chiusura varchi»
   o «Chiudi nell'editor».
-- Più regioni chiuse: si selezionano con un clic (default la più grande) e diventano più anelli
-  dello stesso profilo.
-- Lisciatura: spline periodica `splprep` con slider «Morbidezza» (default tarato perché il
-  tremolio della mano < 0,5% della lunghezza sparisca), poi ricampionamento a 400 punti con
-  densità proporzionale alla curvatura.
+- Più regioni chiuse (si propongono quelle ≥ 0,25% del foglio, al massimo 20): si selezionano
+  con un clic (default la più grande; mai nessuna) e diventano più anelli dello stesso profilo.
+- Lisciatura: spline `splprep` con slider «Morbidezza» (scarto tipico concesso alla spline, in %
+  del perimetro; default 0,05%, tarato perché il tremolio della mano < 0,5% della lunghezza
+  sparisca senza arrotondare il naso), poi ricampionamento a 400 punti con densità che cresce
+  con la radice della curvatura. Gli spigoli vivi (regola di «Rendi modificabile», §7.5) tagliano
+  il contorno in pezzi lisciati separatamente e restano spigoli.
 
 ### 8.5 Passo 4 — Scala e orientamento
 
 - Scala: **lunghezza lungo il vento** (si scrive, es. «corda 1,2 m») oppure **due punti sulla
   foto + distanza reale**.
-- Orientamento: freccia del vento ruotabile sul disegno (default da sinistra a destra) e
-  «ribalta verticalmente».
+- Orientamento: freccia del vento ruotabile sul disegno (default da sinistra a destra; angolo in
+  gradi antiorari) e «ribalta verticalmente». Il profilo ha il bordo d'attacco a x = 0 e
+  l'ingombro centrato su y = 0.
 - Risultato: `Profile2D` con `source = photo` (SHA-256 della foto, angoli, tutti i parametri):
   riaprire la procedura dal profilo ripristina lo stato dei 4 passi.
 
@@ -1021,7 +1043,8 @@ Ctrl+Z / Ctrl+Shift+Z nell'editor · Esc chiude dialoghi e pannelli. Elenco visi
     (mesh riparata e trasformata, formato di §7.2), `vista.bin` (decimata, se serve),
     `miniatura.png`;
   - `profili/<uuid>.json` (`Profile2D`) + `<uuid>.png` (miniatura);
-  - `foto/<sha256[:16]>.<ext>` (copie delle foto degli schizzi);
+  - `foto/<sha256[:16]>.<ext>` (copie delle foto degli schizzi) + `<sha256[:16]>.json` (nome
+    originale, formato, SHA-256);
   - `disegni/<sha256[:16]>.svg|dxf` (copia intatta dei disegni importati, al massimo 50 MB) +
     `<sha256[:16]>.json` (nome originale);
   - `studi/<uuid>/studio.json` (`SimulationResult` o serie), `storia.npz`, `campi.npz`

@@ -67,6 +67,20 @@ WINDOW_SIZE = "1280,860"
 
 #: No network from Chrome itself (SPEC §2.2). The window, the headless PDF and
 #: the browser tests all use this list. Checked on Google Chrome 155.
+#: Chrome features that call home even with the switches below (see there).
+CHROME_DISABLED_FEATURES: tuple[str, ...] = (
+    "AutofillServerCommunication",
+    "SafeBrowsingHashPrefixRealTimeLookups",
+    "NetworkTimeServiceQuerying",
+    "PreconnectToSearch",
+    "PreconnectToSearchDesktop",
+    "OptimizationHints",
+    "OptimizationHintsFetchingSRP",
+    "OptimizationGuideRemoteFetching",
+    "OptimizationGuideProactivePersonalizedHintsFetching",
+    "OptimizationGuideModelExecution",
+)
+
 CHROME_OFFLINE_FLAGS: tuple[str, ...] = (
     # Service traffic in the background: variations seed, field trials, update
     # pings, the "is the network up" probes.
@@ -94,9 +108,13 @@ CHROME_OFFLINE_FLAGS: tuple[str, ...] = (
     # AutofillServerCommunication: form-type queries to content-autofill.googleapis.com;
     # SafeBrowsingHashPrefixRealTimeLookups: OHTTP key fetch from www.gstatic.com;
     # NetworkTimeServiceQuerying: clients2.google.com/time;
-    # PreconnectToSearch(Desktop): sockets opened to www.google.com in advance.
-    "--disable-features=AutofillServerCommunication,SafeBrowsingHashPrefixRealTimeLookups,"
-    "NetworkTimeServiceQuerying,PreconnectToSearch,PreconnectToSearchDesktop",
+    # PreconnectToSearch(Desktop): sockets opened to www.google.com in advance;
+    # the Optimization Guide (OptimizationHints and its fetching on search pages,
+    # remote fetching, proactive personalised hints, remote model execution): calls to
+    # optimizationguide-pa.googleapis.com, seen once in a full test run (2026-10-16).
+    # Unknown names are ignored without a word: the test checks each one is in the
+    # installed Chrome.
+    "--disable-features=" + ",".join(CHROME_DISABLED_FEATURES),
     # Services no flag turns off, pointed at a dead loopback address. Port 9
     # (discard) is on Chrome's list of unsafe ports: the request fails before
     # any socket is opened. GAIA: the ListAccounts call of the account
