@@ -47,6 +47,20 @@ Launching the command again does not start a second instance: it asks the runnin
 its window and exits. Closing the window closes the program; "Esci" in the interface does the
 same.
 
+### Studies and exports
+
+"Salva studio" in the tunnel stores the current case with its conditions, the time-averaged
+fields and a few pictures; a series runs the same case over a range of incidences, speeds or
+section depths. Every export is a download: CSV (history, Cp along the contour, series points,
+`;` and decimal comma by default), VTK, JSON, DXF/SVG of the profile, and a PDF report printed
+by the same Chrome the window uses (headless, no network).
+
+The VTK files open in ParaView (`sudo apt install paraview`, not a dependency): the `.vti` holds
+the mean fields on the cell centres of the chamber (velocity in m/s, Cp, pressure in Pa,
+vorticity in 1/s, the body's mask), the `.vtp` the outline with its mean Cp. In ParaView, open
+the file, press "Apply", choose the array to colour by; "Glyph" on `velocita_m_s` draws arrows.
+The conditions of the case are in a comment at the top of each file.
+
 ## Development
 
 Requires [`uv`](https://docs.astral.sh/uv/) and, for the interface only, Node.
@@ -99,14 +113,18 @@ backend/gdv/
                      contract, its validation and repair; SVG/DXF import, DXF/SVG export;
                      raster2d.py, the reference mask of the solver; sketch/, the photo of a
                      hand sketch -> profile (sheet, thresholding, outline; OpenCV)
-  physics/           fluid properties and the planner (CaseSetup -> CasePlan)
+  physics/           fluid properties, the planner (CaseSetup -> CasePlan), real forces
+  studies/           SimulationResult and studies on disk, mean fields, CSV/VTK exports,
+                     comparison, the PDF report (headless Chrome)
   lattice.py         D2Q9 constants and MRT matrices, the single source of the shader's ones
   static/            the interface served by the server (built from frontend/)
 frontend/src/
-  pages/             screens (Library, ModelSetup, Section, ProfileEditor, Tunnel, ...)
+  pages/             screens (Library, ModelSetup, Section, ProfileEditor, Tunnel, Study,
+                     Compare, Report, ...)
   sim2d/             the GPU solver (WebGL2 shaders), mask, views, forces, series, streamlines
-  tunnel/            the tunnel screen (conditions, results, top bar)
-  charts/            uPlot charts (coefficient history, Cp on the contour, probes)
+  tunnel/            the tunnel screen (conditions, results, top bar), saving studies, series
+  study/             how a saved result reads: conditions, coefficients, charts, fields
+  charts/            uPlot charts (coefficient history, Cp on the contour, probes, curves)
   section/           live sections: the slicer and its Web Worker
   sketch/            the sketch wizard's pieces: image overlay, previews, click geometry
   profile/           2D geometry: validation, repair (Clipper2), splines, fitting, measures

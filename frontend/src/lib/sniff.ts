@@ -4,7 +4,7 @@
 // What kind of file the user dropped, from its *content* (SPEC §12.1): the
 // extension is only a tie-breaker. The backend checks again on its side.
 
-export type FileKind = 'mesh' | 'svg' | 'dxf' | 'image' | 'heic' | 'unknown'
+export type FileKind = 'mesh' | 'svg' | 'dxf' | 'image' | 'heic' | 'study' | 'unknown'
 
 const MESH_TOKENS = new Set(['v', 'vn', 'vt', 'f', 'o', 'g', 'mtllib', 'usemtl', 's'])
 // ISO-BMFF brands of HEIC/HEIF photos (iPhone): recognised to say they are not supported.
@@ -30,6 +30,8 @@ export function sniffBytes(head: Uint8Array, size: number): FileKind {
   }
   const text = new TextDecoder('latin1').decode(head.subarray(0, 4096))
   const trimmed = text.trimStart().toLowerCase()
+  // A study exported as JSON (SPEC §11.5), to reopen it.
+  if (trimmed.startsWith('{') && /"formato"\s*:\s*"galleriadelvento-studio"/.test(text)) return 'study'
   if (trimmed.startsWith('solid') && trimmed.includes('facet')) return 'mesh'
   if (/<svg[\s>]/i.test(text)) return 'svg'
   const lines = text.split(/\r?\n/).map((l) => l.trim())

@@ -7,8 +7,6 @@ read with a small parser for the plain style it is written in (one
 ``export type Name = {...}`` per model, ``field: type`` per line). Both sides
 are reduced to the same notation -- ``number``, ``string``, ``array<T>``,
 ``tuple<A,B>``, literal sets, model names, unions -- and compared.
-
-SimulationResult joins the list in Phase 5.
 """
 
 from __future__ import annotations
@@ -22,7 +20,8 @@ from pydantic import BaseModel
 
 from gdv.geometry import profile
 from gdv.geometry.sketch import params as sketch_params
-from gdv.physics import fluids, planner
+from gdv.physics import coefficients, fluids, planner
+from gdv.studies import compare, result, store
 
 TYPES_TS = Path(__file__).resolve().parents[1] / "frontend" / "src" / "lib" / "types.ts"
 
@@ -45,6 +44,25 @@ CONTRACTS: list[type[BaseModel]] = [
     planner.PlanTexts,
     planner.CasePlan,
     fluids.FluidProperties,
+    coefficients.Stat,
+    coefficients.Coefficients,
+    coefficients.Forces,
+    result.TimeSeriesRef,
+    result.FieldRef,
+    result.ContourCpRef,
+    result.SimulationResult,
+    result.StudyPoint,
+    result.SeriesSpec,
+    result.Study,
+    result.StudySummary,
+    store.StudyEnvelope,
+    result.StudyMeta,
+    result.HistoryData,
+    result.ContourData,
+    result.MeanData,
+    result.PointUpload,
+    compare.CompareRow,
+    compare.Comparison,
 ]
 
 # --- Python side ---------------------------------------------------------------------

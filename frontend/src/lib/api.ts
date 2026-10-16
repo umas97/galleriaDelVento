@@ -10,6 +10,7 @@ import type {
   CasePlan,
   CaseSetup,
   CheckResult,
+  Comparison,
   DrawingInfo,
   ImportResult,
   ModelRecord,
@@ -22,6 +23,10 @@ import type {
   SketchParams,
   SketchPreview,
   SketchStage,
+  StudyEnvelope,
+  Study,
+  StudyMeta,
+  StudySummary,
   StudyTypePreset,
 } from './types'
 
@@ -171,6 +176,29 @@ export const api = {
   sketchDraft: (id: string, params: SketchParams, name: string) =>
     request<CheckResult>(`/api/sketches/${id}/draft`, { method: 'POST', body: json({ params, name }) }),
   sketchPhotoUrl: (id: string) => `/api/sketches/${id}/photo.jpg`,
+
+  studies: () => request<StudySummary[]>('/api/studies'),
+  study: (id: string) => request<StudyEnvelope>(`/api/studies/${id}`),
+  createStudy: (body: Blob, onProgress?: (f: number) => void) => uploadBytes<Study>('/api/studies', body, onProgress),
+  createSeries: (meta: StudyMeta) => request<Study>('/api/studies/series', { method: 'POST', body: json(meta) }),
+  addStudyPoint: (id: string, body: Blob) => uploadBytes<Study>(`/api/studies/${id}/points`, body),
+  finishSeries: (id: string, state: 'done' | 'stopped') =>
+    request<Study>(`/api/studies/${id}/finish`, { method: 'POST', body: json({ state }) }),
+  updateStudy: (id: string, change: { name?: string; notes?: string }) =>
+    request<Study>(`/api/studies/${id}`, { method: 'PATCH', body: json(change) }),
+  deleteStudy: (id: string) => request<{ freed_bytes: number }>(`/api/studies/${id}`, { method: 'DELETE' }),
+  importStudy: (file: File, onProgress?: (f: number) => void) => uploadBytes<Study>('/api/studies/import', file, onProgress),
+  compareStudies: (ids: string[]) => request<Comparison>('/api/studies/compare', { method: 'POST', body: json({ ids }) }),
+  studyHistory: (id: string, k: number) =>
+    request<{ step: number[]; cd: number[]; cl: number[]; cm: number[] }>(`/api/studies/${id}/points/${k}/history`),
+  studyContour: (id: string, k: number) =>
+    request<{ xc: number[]; s: number[]; upper: boolean[]; cp: number[]; x: number[]; y: number[] }>(`/api/studies/${id}/points/${k}/contour`),
+  studyFields: (id: string, k: number) => requestBuffer(`/api/studies/${id}/points/${k}/fields.bin`),
+  studyThumbnailUrl: (id: string) => `/api/studies/${id}/thumbnail.png`,
+  studyViewUrl: (id: string, k: number, name: string) => `/api/studies/${id}/points/${k}/views/${name}.png`,
+  exportStudy: (id: string, what: string) => download(`/api/studies/${id}/${what}`),
+  reportChrome: () => request<{ available: boolean }>('/api/reports/chrome'),
+  claimReport: (token: string) => request<{ study_id: string }>('/api/reports/claim', { method: 'POST', body: json({ token }) }),
   sketchSheetUrl: (id: string, corners: readonly (readonly [number, number])[] | null) =>
     `/api/sketches/${id}/sheet.jpg${corners ? `?corners=${corners.flat().map((v) => v.toFixed(5)).join(',')}` : ''}`,
 }

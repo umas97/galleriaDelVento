@@ -43,7 +43,8 @@ export type Probe = { x: number; y: number }
 
 export type ProbeReading = { x: number; y: number; speed: number; cp: number; history: { step: number; speed: number; cp: number }[] }
 
-export type CpPoint = { xc: number; s: number; upper: boolean; cp: number }
+/** A point of the mean Cp along the contour; x, y: where it sits in the chamber, cells. */
+export type CpPoint = { xc: number; s: number; upper: boolean; cp: number; x: number; y: number }
 
 export type EngineSnapshot = {
   step: number
@@ -67,6 +68,24 @@ export type EngineSnapshot = {
 }
 
 export type Body = { loops: Pt[][]; rule: OuterRule }
+
+/** A picture of a view for a study (SPEC §11.2). */
+export type ViewKind = 'speed' | 'pressure' | 'vorticity' | 'smoke'
+
+/** Everything a saved result needs from the GPU side (SPEC §11.1). */
+export type EngineResult = {
+  step: number
+  unstable: boolean
+  stats: SeriesStats
+  rhoInf: number
+  history: CoefSample[]
+  cp: CpPoint[]
+  /** Sums of (δρ, ux, uy, samples) per cell, or null before averaging starts. */
+  mean: { sums: Float32Array; samples: number; rhoInf: number } | null
+  mask: Uint8Array
+  nx: number
+  ny: number
+}
 
 function percentile(values: number[], q: number): number {
   if (!values.length) return 0
@@ -115,6 +134,14 @@ export class TunnelEngine {
   private lastPublish = 0
   private rakeSeeds: [number, number][] | null = null
   private disposed = false
+  /** The body's mask as last rasterised. */
+  private mask: Uint8Array = new Uint8Array(0)
+  /** The latest downsampled field (a copy: the streamline worker takes the original). */
+  private lastFieldData: Field | null = null
+  /** Sum of ρ∞ over the samples in the GPU's time averages. */
+  private meanRho = 0
+  /** When the current flow started from rest. */
+  private startedAt = performance.now()
   options: ViewState = {
     field: 'speed',
     smoke: false,
@@ -160,6 +187,7 @@ export class TunnelEngine {
     this.view?.dispose()
     this.params = params
     this.solver = new Solver(this.gl, params)
+    this.startedAt = performance.now()
     this.view = new FlowView(this.gl, params.nx, params.ny)
     this.view.setColorMap(this.mapFor(this.options.field))
     this.series = new CoefficientSeries(seriesOptions)
@@ -231,6 +259,7 @@ export class TunnelEngine {
 
   /** R: the flow from rest, same plan. */
   restart(): void {
+    this.startedAt = performance.now()
     this.solver?.restart()
     this.view?.clear()
     this.series?.clear()
@@ -247,6 +276,11 @@ export class TunnelEngine {
 
   get step(): number {
     return this.solver?.step ?? 0
+  }
+
+  /** Seconds since the current flow started from rest. */
+  get runSeconds(): number {
+    return (performance.now() - this.startedAt) / 1000
   }
 
   /** Canvas pixel (CSS, from the top-left) → chamber cells. */
@@ -299,6 +333,8 @@ export class TunnelEngine {
   }
 
   private restartCp(): void {
+    this.solver?.resetMean()
+    this.meanRho = 0
     this.cpSum = new Float64Array(this.contour.length)
     this.cpCount = 0
     this.cpFrom = this.solver ? this.solver.step + (this.plan?.tc_steps ?? 0) : 0
@@ -320,6 +356,7 @@ export class TunnelEngine {
     const placed = place(this.outer, this.placement)
     const mask = rasterize(placed, nx, ny, this.plan.dx)
     this.solver.setMask(mask)
+    this.mask = mask
     const w = nx * this.plan.dx
     const h = ny * this.plan.dx
     this.clipped = placed.some((l) => l.some(([x, y]) => x < 0 || y < 0 || x > w || y > h))
@@ -392,8 +429,14 @@ export class TunnelEngine {
   }
 
   private autoRange(field: Field): void {
+    const range = this.rangeOf(field, this.options.field)
+    if (range) this.range = range
+  }
+
+  /** The automatic colour range of a field mode on a downsampled field. */
+  private rangeOf(field: Field, mode: FieldMode): [number, number] | null {
     const plan = this.plan
-    if (!plan) return
+    if (!plan) return null
     const values: number[] = []
     const q = 0.5 * this.rhoInf * plan.u_lat * plan.u_lat
     const { w, h, data } = field
@@ -401,18 +444,18 @@ export class TunnelEngine {
       for (let i = 1; i < w - 1; i += 1) {
         const k = 4 * (j * w + i)
         if (data[k + 3] > 0) continue
-        if (this.options.field === 'speed') values.push(Math.hypot(data[k + 1], data[k + 2]))
-        else if (this.options.field === 'pressure') values.push((1 + data[k] - this.rhoInf) / 3 / q)
+        if (mode === 'speed') values.push(Math.hypot(data[k + 1], data[k + 2]))
+        else if (mode === 'pressure') values.push((1 + data[k] - this.rhoInf) / 3 / q)
         else {
           const dvdx = (data[k + 4 + 2] - data[k - 4 + 2]) / (2 * field.factor)
           const dudy = (data[k + 4 * w + 1] - data[k - 4 * w + 1]) / (2 * field.factor)
           values.push(dvdx - dudy)
         }
       }
-    if (!values.length) return
+    if (!values.length) return null
     let lo = percentile(values, 0.02)
     let hi = percentile(values, 0.98)
-    if (this.options.field !== 'speed' || isDiverging(this.mapFor(this.options.field))) {
+    if (mode !== 'speed' || isDiverging(this.mapFor(mode))) {
       const m = Math.max(Math.abs(lo), Math.abs(hi), 1e-9)
       lo = -m
       hi = m
@@ -420,7 +463,13 @@ export class TunnelEngine {
       lo = 0
       hi = Math.max(hi, plan.u_lat * 0.1)
     }
-    this.range = [lo, hi]
+    return [lo, hi]
+  }
+
+  /** The colour range a view of `mode` uses now: the locked one for the field shown, else automatic. */
+  rangeFor(mode: FieldMode): [number, number] {
+    if (mode === this.options.field) return this.options.locked ?? this.range
+    return (this.lastFieldData && this.rangeOf(this.lastFieldData, mode)) ?? this.range
   }
 
   private requestStreamlines(field: Field): void {
@@ -479,9 +528,15 @@ export class TunnelEngine {
       this.pendingSingle = 0
     }
     const ref = this.momentPoint()
+    const averaging = this.series?.averagingFrom ?? Infinity
     for (let done = 0; done < steps; done += MEASURE_EVERY) {
       solver.run(MEASURE_EVERY)
       solver.measure(ref)
+      // Time averages of the fields, over the same window as the coefficients.
+      if (solver.step >= averaging && !this.unstable) {
+        solver.accumulate()
+        this.meanRho += this.rhoInf
+      }
     }
     if (steps) {
       view.advance(solver, steps, this.options.smoke, this.options.particles)
@@ -496,6 +551,7 @@ export class TunnelEngine {
     }
     for (const f of solver.collectFields()) {
       const field: Field = { w: f.w, h: f.h, factor: f.factor, data: f.data }
+      this.lastFieldData = { ...field, data: f.data.slice() }
       if (!this.options.locked) this.autoRange(field)
       this.requestStreamlines(field)
     }
@@ -559,7 +615,51 @@ export class TunnelEngine {
   /** Mean Cp along the contour since averaging started. */
   private cpCurve(): CpPoint[] {
     if (!this.cpCount) return []
-    return this.contour.map((c, k) => ({ xc: c.xc, s: c.s, upper: c.upper, cp: this.cpSum[k] / this.cpCount }))
+    return this.contour.map((c, k) => ({ xc: c.xc, s: c.s, upper: c.upper, cp: this.cpSum[k] / this.cpCount, x: c.x, y: c.y }))
+  }
+
+  /** What a study saves of the current case (SPEC §11.1, §11.2). */
+  async result(): Promise<EngineResult | null> {
+    const solver = this.solver
+    if (!solver || !this.params || !this.series) return null
+    const samples = solver.meanSamples
+    const rhoInf = samples ? this.meanRho / samples : this.rhoInf
+    const sums = samples && !this.unstable ? await solver.readMean() : null
+    if (this.disposed || solver !== this.solver) return null
+    return {
+      step: solver.step,
+      unstable: this.unstable,
+      stats: this.snapshot().stats,
+      rhoInf: this.rhoInf,
+      history: this.series.all(),
+      cp: this.cpCurve(),
+      mean: sums ? { sums, samples, rhoInf } : null,
+      mask: this.mask.slice(),
+      nx: this.params.nx,
+      ny: this.params.ny,
+    }
+  }
+
+  /**
+   * One view at the grid's resolution, with the outline, for a study (SPEC
+   * §11.2): speed, Cp, vorticity, or the smoke over the field shown. The
+   * colour range is the one that view would get now.
+   */
+  async renderView(kind: ViewKind): Promise<{ canvas: HTMLCanvasElement; range: [number, number]; mode: FieldMode } | null> {
+    const view = this.view
+    const params = this.params
+    if (!view || !params) return null
+    const mode: FieldMode = kind === 'smoke' ? this.options.field : kind
+    const range = this.rangeFor(mode)
+    const shown = this.options.field
+    if (mode !== shown) view.setColorMap(this.mapFor(mode))
+    const canvas = await this.renderImage({ field: mode, smoke: kind === 'smoke', particles: false, range }, params.nx, params.ny, {
+      originX: 0,
+      originY: 0,
+      cellsPerPixel: 1,
+    })
+    if (mode !== shown) this.view?.setColorMap(this.mapFor(shown))
+    return canvas ? { canvas, range, mode } : null
   }
 
   snapshot(): EngineSnapshot {
@@ -686,28 +786,32 @@ export class TunnelEngine {
    * stalled for it.
    */
   async renderLarge(factor = 2): Promise<HTMLCanvasElement | null> {
+    const base = this.transform()
+    const t: Transform = { originX: base.originX * factor, originY: base.originY * factor, cellsPerPixel: base.cellsPerPixel / factor }
+    const o = this.options
+    const options = { field: o.field, smoke: o.smoke, particles: o.particles, range: o.locked ?? this.range }
+    return this.renderImage(options, this.canvas.width * factor, this.canvas.height * factor, t, factor)
+  }
+
+  /** A view into a w × h 2D canvas with the overlay, read back without stalling the GPU. */
+  private async renderImage(
+    options: { field: FieldMode; smoke: boolean; particles: boolean; range: [number, number] },
+    w: number,
+    h: number,
+    t: Transform,
+    overlayScale = 1 / (window.devicePixelRatio || 1),
+  ): Promise<HTMLCanvasElement | null> {
     const solver = this.solver
     const view = this.view
     if (!solver || !view || !this.plan) return null
     const gl = this.gl
-    const w = this.canvas.width * factor
-    const h = this.canvas.height * factor
     const tex = gl.createTexture()!
     gl.bindTexture(gl.TEXTURE_2D, tex)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null)
     const fb = gl.createFramebuffer()!
     gl.bindFramebuffer(gl.FRAMEBUFFER, fb)
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0)
-    const base = this.transform()
-    const t: Transform = { originX: base.originX * factor, originY: base.originY * factor, cellsPerPixel: base.cellsPerPixel / factor }
-    view.render(
-      solver,
-      { field: this.options.field, smoke: this.options.smoke, particles: this.options.particles, range: this.options.locked ?? this.range, rhoInf: this.rhoInf, uLat: this.plan.u_lat },
-      t,
-      fb,
-      w,
-      h,
-    )
+    view.render(solver, { ...options, rhoInf: this.rhoInf, uLat: this.plan.u_lat }, t, fb, w, h)
     const buffer = gl.createBuffer()!
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, buffer)
     gl.bufferData(gl.PIXEL_PACK_BUFFER, w * h * 4, gl.STREAM_READ)
@@ -740,7 +844,7 @@ export class TunnelEngine {
     out.height = h
     const ctx = out.getContext('2d')!
     ctx.putImageData(new ImageData(flipped, w, h), 0, 0)
-    this.drawOverlay(t, ctx, factor)
+    this.drawOverlay(t, ctx, overlayScale)
     return out
   }
 }

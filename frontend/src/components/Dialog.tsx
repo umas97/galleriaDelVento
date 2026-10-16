@@ -53,6 +53,7 @@ export function Button({
   title,
   label,
   type = 'button',
+  testId,
 }: {
   children: ReactNode
   onClick?: () => void
@@ -62,6 +63,7 @@ export function Button({
   /** Accessible name, when the visible text alone is ambiguous. */
   label?: string
   type?: 'button' | 'submit'
+  testId?: string
 }) {
   const styles = {
     primary: 'bg-accent text-ink-950 hover:brightness-110',
@@ -77,6 +79,7 @@ export function Button({
       disabled={disabled}
       title={title}
       aria-label={label}
+      data-testid={testId}
     >
       {children}
     </button>

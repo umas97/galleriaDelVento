@@ -12,7 +12,10 @@ import { LibraryPage } from './pages/Library'
 import { ModelSetupPage } from './pages/ModelSetup'
 import { ProfileEditorPage } from './pages/ProfileEditor'
 import { SectionPage } from './pages/Section'
+import { ComparePage } from './pages/ComparePage'
+import { ReportPage } from './pages/ReportPage'
 import { SketchWizardPage } from './pages/SketchWizard'
+import { StudyPage } from './pages/StudyPage'
 import { TunnelPage } from './pages/Tunnel'
 
 export function App() {
@@ -27,6 +30,9 @@ export function App() {
           <Route path="/profili/:id" element={<ProfileEditorPage />} />
           <Route path="/schizzi/:id" element={<SketchWizardPage />} />
           <Route path="/galleria/:kind/:id" element={<TunnelPage />} />
+          <Route path="/studi/:id" element={<StudyPage />} />
+          <Route path="/confronto" element={<ComparePage />} />
+          <Route path="/report/:id" element={<ReportPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AppShell>

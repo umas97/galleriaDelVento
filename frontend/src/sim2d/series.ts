@@ -175,6 +175,16 @@ export class CoefficientSeries {
     this.averageFrom = this.options.transientSteps
   }
 
+  /** First step of the averaging window. */
+  get averagingFrom(): number {
+    return this.averageFrom
+  }
+
+  /** Every sample kept (the history a study saves). */
+  all(): CoefSample[] {
+    return this.samples.slice()
+  }
+
   /** The samples of the last CHART_STEPS steps, for the chart. */
   chart(): CoefSample[] {
     const last = this.samples.length ? this.samples[this.samples.length - 1].step : 0

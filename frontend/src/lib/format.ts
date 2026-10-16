@@ -16,7 +16,8 @@ function formatter(digits: number): Intl.NumberFormat {
 }
 
 export function num(value: number, digits = 2): string {
-  return formatter(digits).format(value)
+  // A value that rounds to zero is 0, not «-0».
+  return formatter(digits).format(Math.abs(value) < 0.5 * 10 ** -digits ? 0 : value)
 }
 
 /** Lengths in metres with a sensible number of significant digits. */

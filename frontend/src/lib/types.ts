@@ -380,3 +380,211 @@ export type CasePlan = {
   force_per_coefficient: number
   texts: PlanTexts
 }
+
+// --- results and studies (SPEC §11): the SimulationResult contract ------------------
+// Mirrors backend/gdv/studies/result.py, physics/coefficients.py and
+// studies/compare.py; test 5 compares them.
+
+export type Stat = {
+  mean: number
+  std: number
+}
+
+export type Coefficients = {
+  cd: Stat | null
+  cl: Stat | null
+  cm: Stat | null
+  clcd: number | null
+  strouhal: number | null
+  regime: 'steady' | 'periodic' | null
+  change: number | null
+  averaged_steps: number
+  rho_inf: number
+}
+
+export type Forces = {
+  drag: number | null
+  lift: number | null
+  moment: number | null
+  unit: 'N/m'
+}
+
+export type TimeSeriesRef = {
+  file: string
+  samples: number
+  every: number
+}
+
+export type FieldName = 'u' | 'v' | 'cp' | 'vorticity'
+
+export type FieldRef = {
+  file: string
+  key: string
+  name: FieldName
+  unit: string
+  scale: number
+  nx: number
+  ny: number
+  dx: number
+  samples: number
+}
+
+export type ContourCpRef = {
+  file: string
+  points: number
+  chord: boolean
+}
+
+export type ResultStatus = 'converged' | 'provisional' | 'unstable'
+
+export type SimulationResult = {
+  case: CaseSetup
+  plan: CasePlan
+  status: ResultStatus
+  coefficients: Coefficients
+  forces_real: Forces
+  history: TimeSeriesRef
+  fields: FieldRef[]
+  contour_cp: ContourCpRef
+  created_at: string
+  app_version: string
+  schema_version: number
+}
+
+export type ViewName = 'velocita' | 'cp' | 'vorticita' | 'fumo' | 'modello'
+
+export type StudyPoint = {
+  value: number | null
+  result: SimulationResult
+  steps: number
+  elapsed_s: number
+  views: ViewName[]
+}
+
+export type SeriesParameter = 'angle' | 'speed' | 'depth'
+export type SeriesState = 'running' | 'done' | 'stopped'
+
+export type SeriesSpec = {
+  parameter: SeriesParameter
+  values: number[]
+  state: SeriesState
+}
+
+export type Study = {
+  id: string
+  name: string
+  notes: string
+  kind: 'single' | 'series'
+  series: SeriesSpec | null
+  profile_id: string | null
+  profile_name: string
+  model_id: string | null
+  model_name: string | null
+  points: StudyPoint[]
+  created_at: string
+  updated_at: string
+  schema_version: number
+}
+
+export type StudySummary = {
+  id: string
+  name: string
+  kind: 'single' | 'series'
+  parameter: SeriesParameter | null
+  state: SeriesState | null
+  points: number
+  planned: number
+  status: ResultStatus | null
+  profile_id: string | null
+  profile_name: string
+  model_id: string | null
+  model_name: string | null
+  cd: number | null
+  cl: number | null
+  reynolds: string
+  created_at: string
+  size_bytes: number
+  has_thumbnail: boolean
+  read_only: boolean
+}
+
+export type StudyEnvelope = {
+  study: Study
+  read_only: boolean
+  size_bytes: number
+  has_thumbnail: boolean
+}
+
+export type StudyMeta = {
+  name: string
+  notes: string
+  profile_id: string | null
+  profile_name: string
+  model_id: string | null
+  model_name: string | null
+  series: SeriesSpec | null
+}
+
+export type HistoryData = {
+  every: number
+  step: number[]
+  cd: number[]
+  cl: number[]
+  cm: number[]
+}
+
+export type ContourData = {
+  chord: boolean
+  xc: number[]
+  s: number[]
+  upper: boolean[]
+  cp: number[]
+  x: number[]
+  y: number[]
+}
+
+export type MeanData = {
+  samples: number
+  rho_inf: number
+}
+
+export type PointUpload = {
+  value: number | null
+  case: CaseSetup
+  plan: CasePlan
+  status: ResultStatus
+  coefficients: Coefficients
+  history: HistoryData
+  contour: ContourData
+  mean: MeanData | null
+  steps: number
+  elapsed_s: number
+}
+
+export type CoefficientKey = 'cd' | 'cl' | 'cm' | 'clcd' | 'st'
+
+export type CompareRow = {
+  study_id: string
+  name: string
+  kind: 'single' | 'series'
+  points: number
+  status: ResultStatus | null
+  reynolds: string
+  re_real: number | null
+  re_sim: number | null
+  reference_kind: ReferenceKind | null
+  reference_length: number | null
+  grid: string
+  angle_deg: number | null
+  speed: number | null
+  values: Record<CoefficientKey, number | null>
+  diff: Record<CoefficientKey, number | null>
+  comparable: boolean
+  reasons: string[]
+}
+
+export type Comparison = {
+  rows: CompareRow[]
+  comparable: boolean
+  warning: string | null
+}

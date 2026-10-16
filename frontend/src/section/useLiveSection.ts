@@ -37,6 +37,8 @@ export type LiveSection = {
   release: () => void
   /** One cut outside the live sequence, at a finer cell (to save or export). */
   snapshot: (cell: number) => Promise<CutResult | null>
+  /** One cut outside the live sequence at another depth (metres along the normal). */
+  cutAt: (depth: number, cell: number) => Promise<CutResult | null>
   runBench: (cuts: number, cell: number) => void
 }
 
@@ -102,9 +104,13 @@ export function useLiveSection(model: ModelRecord, input: LiveSectionInput): Liv
     async (fine: number) => (client.current ? client.current.snapshot(depth, fine) : null),
     [depth],
   )
+  const cutAt = useCallback(
+    async (at: number, fine: number) => (client.current ? client.current.snapshot(at, fine) : null),
+    [],
+  )
   const runBench = useCallback((cuts: number, c: number) => client.current?.bench(attitude, cuts, c), [attitude])
 
-  return { loaded, index, cut, depth, workerError, loadError, bench, drag, release, snapshot, runBench }
+  return { loaded, index, cut, depth, workerError, loadError, bench, drag, release, snapshot, cutAt, runBench }
 }
 
 export type { CutResult }

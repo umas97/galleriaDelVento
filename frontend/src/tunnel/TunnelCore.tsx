@@ -19,8 +19,9 @@ import { Button } from '../components/Dialog'
 import { ErrorNotice } from '../components/ErrorNotice'
 import { Tip } from '../components/Tip'
 import { api } from '../lib/api'
+import { setUnsaved } from '../lib/busy'
 import { isTextField, metres, num } from '../lib/format'
-import type { CasePlan, CaseSetup, Fluid, Ground, InletProfile, ProfileDraft, ReferenceKind, Resolution } from '../lib/types'
+import type { CasePlan, CaseSetup, Fluid, Ground, InletProfile, ProfileDraft, ReferenceKind, Resolution, SeriesParameter } from '../lib/types'
 import type { Pt } from '../profile/geometry'
 import { MAX_PROBES, TunnelEngine, type EngineSnapshot, type Probe, type ViewState } from '../sim2d/engine'
 import { gpuSupport } from '../sim2d/gl'
@@ -29,6 +30,7 @@ import { rakeSeeds } from '../sim2d/streamlines'
 import { t, type MessageKey } from '../i18n/it'
 import { ProbeChart } from '../charts/ProbeChart'
 import { Results } from './Results'
+import { StudyPanel, type StudyHost } from './StudyPanel'
 import { Badge, Legend, NumberField, Panel, Row, Select, digitsFor } from './parts'
 
 export type CaseState = {
@@ -64,6 +66,20 @@ export type TunnelBody = {
   depthKey: number
   /** For the snapshot caption. */
   sectionInfo: string | null
+  /** The library profile simulated (null for a live section). */
+  profileId: string | null
+  /** The model a section comes from. */
+  model: { id: string; name: string } | null
+}
+
+/** A section of the model at a depth, for a depth series (SPEC §11.3). */
+export type DepthCut = (fraction: number) => Promise<{ loops: Pt[][]; draft: ProfileDraft } | null>
+
+declare global {
+  interface Window {
+    /** Tests only: the ceiling of a series point, in steps (instead of ramp + 20 T_c). */
+    __gdvSeriesCap?: number | ((plan: CasePlan) => number)
+  }
 }
 
 const STORE = 'tunnel-case'
@@ -137,6 +153,10 @@ export function TunnelCore({
   modelPanel,
   onPlan,
   onPlacement,
+  saveSection,
+  depthCut,
+  captureScene,
+  onLocked,
 }: {
   body: TunnelBody
   initial: CaseState
@@ -145,6 +165,13 @@ export function TunnelCore({
   onPlan?: (plan: CasePlan) => void
   /** Where the body sits in the chamber and its incidence, whenever they change. */
   onPlacement?: (position: Pt, angleDeg: number) => void
+  /** A model's live section, saved as a library profile before a study points at it. */
+  saveSection?: () => Promise<{ id: string; name: string } | null>
+  depthCut?: DepthCut
+  /** The mini-scene with the plane, as a PNG (for the report). */
+  captureScene?: () => Promise<Blob | null>
+  /** A series locks (and unlocks) the controls, the model's too. */
+  onLocked?: (on: boolean) => void
 }) {
   const support = useMemo(() => gpuSupport(), [])
   const [state, setState] = useState<CaseState>(initial)
@@ -182,6 +209,13 @@ export function TunnelCore({
   const recorder = useRef<MediaRecorder | null>(null)
   const latest = useRef({ state, body, referenceValue })
   latest.current = { state, body, referenceValue }
+  const [locked, setLocked] = useState(false)
+  const lockedRef = useRef(false)
+  /** The section of the current depth series point (the body's draft lags behind). */
+  const seriesDraft = useRef<ProfileDraft | null>(null)
+  /** First step of the averaging window last saved as a study. */
+  const savedWindow = useRef<number | null>(null)
+  const [savedTick, setSavedTick] = useState(0)
   const benchMode = new URLSearchParams(window.location.search).get('bench')
 
   // --- the engine -----------------------------------------------------------------
@@ -219,17 +253,17 @@ export function TunnelCore({
   }, [support.ok, engineKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- plans ------------------------------------------------------------------------
-  const requestPlan = useCallback(async (keepChamber: boolean) => {
+  /** The case as it stands: the chamber kept or not, the body's draft or `override`. */
+  const buildSetup = useCallback((keepChamber: boolean, override?: ProfileDraft | null): CaseSetup => {
     const { state: s, body: b, referenceValue: refValue } = latest.current
-    if (!b.draft && !b.envelope) return
-    const seq = ++planSeq.current
-    const draft: ProfileDraft = b.draft ?? {
-      name: b.name,
-      loops: [],
-      spline: null,
-      source: { kind: 'editor', derived_from: null, origin: null },
-    }
-    const setup: CaseSetup = {
+    const draft: ProfileDraft = override ??
+      b.draft ?? {
+        name: b.name,
+        loops: [],
+        spline: null,
+        source: { kind: 'editor', derived_from: null, origin: null },
+      }
+    return {
       profile: draft,
       envelope: b.envelope,
       position: keepChamber ? position.current : null,
@@ -248,10 +282,17 @@ export function TunnelCore({
       max_blockage: s.max_blockage,
       re_sim_scale: s.re_sim_scale,
     }
+  }, [])
+
+  const requestPlan = useCallback(async (keepChamber: boolean, override?: ProfileDraft | null): Promise<CasePlan | null> => {
+    const { state: s, body: b, referenceValue: refValue } = latest.current
+    if (!b.draft && !b.envelope && !override) return null
+    const seq = ++planSeq.current
+    const setup = buildSetup(keepChamber, override)
     setPlanning(true)
     try {
       const next = await api.plan(setup)
-      if (seq !== planSeq.current) return
+      if (seq !== planSeq.current) return null
       setPlanError(null)
       const previous = planRef.current
       planRef.current = next
@@ -267,12 +308,14 @@ export function TunnelCore({
         e.setPlan(next)
         e.setPlacement(position.current, latest.current.state.angle_deg)
       }
+      return next
     } catch (error) {
       if (seq === planSeq.current) setPlanError(error)
+      return null
     } finally {
       if (seq === planSeq.current) setPlanning(false)
     }
-  }, [onPlan, onPlacement])
+  }, [onPlan, onPlacement, buildSetup])
 
   // Physical conditions: same chamber, new grid or τ.
   const physicsKey = JSON.stringify([
@@ -351,7 +394,7 @@ export function TunnelCore({
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const e = engine.current
     const p = planRef.current
-    if (!e || !p) return
+    if (!e || !p || lockedRef.current) return
     const cell = e.toCells(event.clientX, event.clientY)
     if (event.button === 2) return
     ;(event.target as HTMLElement).setPointerCapture(event.pointerId)
@@ -405,7 +448,7 @@ export function TunnelCore({
   const onContextMenu = (event: React.MouseEvent<HTMLCanvasElement>) => {
     event.preventDefault()
     const e = engine.current
-    if (!e) return
+    if (!e || lockedRef.current) return
     if (tool === 'probe') {
       const hit = probeAt(e.toCells(event.clientX, event.clientY))
       if (hit >= 0) setProbes((list) => list.filter((_, i) => i !== hit))
@@ -526,9 +569,91 @@ export function TunnelCore({
     return () => window.clearInterval(id)
   }, [recording, stopRecording])
 
+  // --- studies and series (SPEC §11.2, §11.3) -----------------------------------------
+  const lock = useCallback(
+    (on: boolean) => {
+      lockedRef.current = on
+      setLocked(on)
+      onLocked?.(on)
+      if (!on) seriesDraft.current = null
+    },
+    [onLocked],
+  )
+
+  /** Until the plan satisfies `ok` (a replan in flight), at most `ms`. */
+  const waitForPlan = useCallback(async (ok: (p: CasePlan) => boolean, ms = 30_000): Promise<boolean> => {
+    const until = performance.now() + ms
+    while (performance.now() < until) {
+      const p = planRef.current
+      if (p && ok(p) && engine.current?.plan === p) return true
+      await new Promise((r) => setTimeout(r, 50))
+    }
+    return false
+  }, [])
+
+  const studyHost: StudyHost = {
+    engine: () => engine.current,
+    context: async (value) => {
+      const p = planRef.current
+      const draft = seriesDraft.current ?? latest.current.body.draft
+      if (!p || !draft || !engine.current) return null
+      return {
+        setup: buildSetup(true, draft),
+        plan: p,
+        value,
+        elapsedSeconds: engine.current.runSeconds,
+        lines: caption(),
+        smoke: view.smoke,
+        sequential: view.sequential,
+        diverging: view.diverging,
+        scene: captureScene ? await captureScene() : null,
+      }
+    },
+    apply: async (parameter: SeriesParameter, value: number) => {
+      if (parameter === 'angle') {
+        setAngle(value, false)
+        await requestPlan(true)
+        return waitForPlan(() => true)
+      }
+      if (parameter === 'speed') {
+        latest.current.state = { ...latest.current.state, speed: value }
+        setState((s) => ({ ...s, speed: value }))
+        return waitForPlan((p) => Math.abs(p.speed - value) < 1e-9)
+      }
+      const cut = await depthCut?.(value)
+      if (!cut || !cut.loops.length) return false
+      seriesDraft.current = cut.draft
+      engine.current?.setBody({ loops: cut.loops, rule: latest.current.body.rule })
+      if (latest.current.state.reference_mode === 'section') await requestPlan(true, cut.draft)
+      return true
+    },
+    cap: () => {
+      const p = planRef.current
+      const test = window.__gdvSeriesCap
+      if (!p) return 0
+      return typeof test === 'function' ? test(p) : (test ?? p.max_steps)
+    },
+    setLocked: lock,
+    markSaved: () => {
+      const s = engine.current?.snapshot()
+      if (s) savedWindow.current = s.step - s.stats.averagedSteps
+      setSavedTick((n) => n + 1)
+    },
+    saveSection,
+  }
+
+  // Results not saved as a study: closing the window asks first (SPEC §13).
+  const averagingFrom = snap ? snap.step - snap.stats.averagedSteps : null
+  const hasNumbers = Boolean(snap?.stats.cd && !snap.unstable)
+  useEffect(() => {
+    setUnsaved(hasNumbers && averagingFrom !== savedWindow.current ? t('tunnel.unsavedLeave') : null)
+  }, [hasNumbers, averagingFrom, savedTick])
+  useEffect(() => () => setUnsaved(null), [])
+
   // --- keyboard (SPEC §12.2) ------------------------------------------------------------
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (lockedRef.current) return
       if (isTextField(event.target) || event.ctrlKey || event.metaKey || event.altKey) return
       const e = engine.current
       const target = event.target as HTMLElement | null
@@ -684,9 +809,13 @@ export function TunnelCore({
     <div className="flex h-full min-h-0 flex-col">
       {/* Top bar: the plan's numbers and the badges (SPEC §2.3, §12.1). */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-ink-700 bg-ink-850 px-4 py-1.5 text-xs text-ink-200" data-testid="tunnel-top">
-        <Link to={back.to} className="text-accent hover:underline">
-          {back.label}
-        </Link>
+        {locked ? (
+          <span className="text-ink-300">{back.label}</span>
+        ) : (
+          <Link to={back.to} className="text-accent hover:underline">
+            {back.label}
+          </Link>
+        )}
         <span className="font-semibold text-ink-50">{t('tunnel.title', { name: body.name })}</span>
         {plan ? (
           <>
@@ -720,6 +849,7 @@ export function TunnelCore({
 
       <div className="flex min-h-0 flex-1">
         <aside className="w-80 shrink-0 space-y-3 overflow-y-auto border-r border-ink-700 bg-ink-850 p-3 text-sm">
+          <fieldset disabled={locked} className="m-0 min-w-0 space-y-3 border-0 p-0">
           <div className="flex flex-wrap gap-1.5">
             <Button kind="primary" onClick={() => (engine.current?.isRunning ? engine.current.pause() : engine.current?.play())} label={snap?.running ? t('tunnel.pause') : t('tunnel.play')}>
               {snap?.running ? '❚❚' : '▶'}
@@ -940,7 +1070,14 @@ export function TunnelCore({
             </div>
           </Panel>
 
-          {modelPanel}
+          <div className={locked ? 'pointer-events-none opacity-60' : ''}>{modelPanel}</div>
+          </fieldset>
+          <StudyPanel
+            subject={{ name: body.name, profileId: body.profileId, model: body.model, is3d: body.is3d }}
+            host={studyHost}
+            ready={Boolean(plan && snap && (body.draft || seriesDraft.current))}
+            defaults={{ angle: state.angle_deg, speed: state.speed }}
+          />
         </aside>
 
         <section className="relative min-w-0 flex-1 bg-ink-900">

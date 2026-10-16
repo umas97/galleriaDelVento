@@ -11,7 +11,7 @@ import { ErrorNotice } from '../components/ErrorNotice'
 import { useImport } from '../components/ImportProvider'
 import { api } from '../lib/api'
 import { bytes, metres, num } from '../lib/format'
-import type { ModelRecord, ProfileSummary } from '../lib/types'
+import type { ModelRecord, ProfileSummary, StudySummary } from '../lib/types'
 import { t, type MessageKey } from '../i18n/it'
 
 type Tab = 'models' | 'profiles' | 'studies'
@@ -40,6 +40,7 @@ export function LibraryPage() {
   const navigate = useNavigate()
   const models = useQuery({ queryKey: ['models'], queryFn: api.models })
   const profiles = useQuery({ queryKey: ['profiles'], queryFn: api.profiles })
+  const studies = useQuery({ queryKey: ['studies'], queryFn: api.studies })
 
   const chooseTab = (next: Tab) => {
     setTab(next)
@@ -65,6 +66,7 @@ export function LibraryPage() {
               {t(label)}
               {id === 'models' && models.data ? <span className="ml-1.5 text-ink-300">{models.data.length}</span> : null}
               {id === 'profiles' && profiles.data ? <span className="ml-1.5 text-ink-300">{profiles.data.length}</span> : null}
+              {id === 'studies' && studies.data ? <span className="ml-1.5 text-ink-300">{studies.data.length}</span> : null}
             </button>
           ))}
         </nav>
@@ -83,7 +85,7 @@ export function LibraryPage() {
         >
           <option value="date">{t('library.sort.date')}</option>
           <option value="name">{t('library.sort.name')}</option>
-          <option value="size">{t(tab === 'profiles' ? 'library.sort.points' : 'library.sort.size')}</option>
+          <option value="size">{t(tab === 'profiles' ? 'library.sort.points' : tab === 'studies' ? 'library.sort.bytes' : 'library.sort.size')}</option>
         </select>
         <Button kind="primary" onClick={openPicker}>
           {t('library.import')}
@@ -100,7 +102,7 @@ export function LibraryPage() {
 
       {tab === 'models' ? <ModelGrid query={models} search={search} sort={sort} /> : null}
       {tab === 'profiles' ? <ProfileGrid query={profiles} search={search} sort={sort} /> : null}
-      {tab === 'studies' ? <p className="py-10 text-center text-ink-300">{t('library.studies.empty')}</p> : null}
+      {tab === 'studies' ? <StudyGrid query={studies} search={search} sort={sort} /> : null}
     </div>
   )
 }
@@ -311,6 +313,156 @@ function ProfileGrid({
           }
         >
           <p>{t('library.profile.delete.body')}</p>
+          {remove.isError ? <ErrorNotice error={remove.error} /> : null}
+        </Dialog>
+      ) : null}
+    </>
+  )
+}
+
+const STATUS_TONE = { converged: 'text-ok', provisional: 'text-warn', unstable: 'text-danger' } as const
+
+function StudyGrid({
+  query,
+  search,
+  sort,
+}: {
+  query: ReturnType<typeof useQuery<StudySummary[]>>
+  search: string
+  sort: Sort
+}) {
+  const [toDelete, setToDelete] = useState<StudySummary | null>(null)
+  const [freed, setFreed] = useState<number | null>(null)
+  const [subject, setSubject] = useState('')
+  const [chosen, setChosen] = useState<string[]>([])
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const remove = useMutation({
+    mutationFn: (id: string) => api.deleteStudy(id),
+    onSuccess: (result, id) => {
+      setToDelete(null)
+      setFreed(result.freed_bytes)
+      setChosen((c) => c.filter((x) => x !== id))
+      void queryClient.invalidateQueries({ queryKey: ['studies'] })
+    },
+  })
+
+  // Filter by what was studied: a profile or a model (SPEC §11.2).
+  const subjects = useMemo(() => {
+    const out = new Map<string, string>()
+    for (const s of query.data ?? []) {
+      if (s.model_id) out.set(`m:${s.model_id}`, t('library.studies.model', { name: s.model_name ?? '' }))
+      else if (s.profile_id) out.set(`p:${s.profile_id}`, t('library.studies.profile', { name: s.profile_name }))
+    }
+    return [...out.entries()].sort((a, b) => a[1].localeCompare(b[1], 'it'))
+  }, [query.data])
+
+  const items = useMemo(() => {
+    const needle = search.trim().toLowerCase()
+    const list = (query.data ?? []).filter(
+      (s) =>
+        (!needle || [s.name, s.profile_name, s.model_name ?? ''].some((x) => x.toLowerCase().includes(needle))) &&
+        (!subject || (subject.startsWith('m:') ? s.model_id === subject.slice(2) : s.profile_id === subject.slice(2) && !s.model_id)),
+    )
+    const sorted = [...list]
+    if (sort === 'name') sorted.sort((a, b) => a.name.localeCompare(b.name, 'it'))
+    if (sort === 'size') sorted.sort((a, b) => b.size_bytes - a.size_bytes)
+    return sorted
+  }, [query.data, search, sort, subject])
+
+  if (query.isPending) return <p className="text-ink-300">{t('common.loading')}</p>
+  if (query.isError) return <ErrorNotice error={query.error} />
+  if (!query.data.length) return <p className="py-10 text-center text-ink-300">{t('library.studies.empty')}</p>
+
+  const toggle = (id: string) =>
+    setChosen((c) => (c.includes(id) ? c.filter((x) => x !== id) : c.length >= 4 ? c : [...c, id]))
+
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-3">
+        <select
+          className="rounded-md border border-ink-600 bg-ink-850 px-2 py-1.5 text-sm"
+          value={subject}
+          onChange={(e) => setSubject(e.target.value)}
+          aria-label={t('library.studies.filter')}
+        >
+          <option value="">{t('library.studies.all')}</option>
+          {subjects.map(([key, label]) => (
+            <option key={key} value={key}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <span className="text-sm text-ink-300">{t('library.studies.chosen', { count: chosen.length })}</span>
+        <Button kind="primary" disabled={!chosen.length} onClick={() => navigate(`/confronto?studi=${chosen.join(',')}`)} testId="compare-button">
+          {t('library.studies.compare', { count: chosen.length })}
+        </Button>
+        {freed !== null ? (
+          <span className="text-sm text-ink-300" role="status">
+            {t('library.study.deleted', { size: bytes(freed) })}
+          </span>
+        ) : null}
+      </div>
+      {!items.length ? <p className="py-10 text-center text-ink-300">{t('library.noMatch')}</p> : null}
+      <ul className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3" data-testid="study-grid">
+        {items.map((study) => (
+          <li key={study.id} className="group relative overflow-hidden rounded-lg border border-ink-700 bg-ink-850 hover:border-ink-500">
+            <Link to={`/studi/${study.id}`} className="block">
+              <div className="aspect-[16/10] bg-ink-800">
+                {study.has_thumbnail ? (
+                  <img src={`${api.studyThumbnailUrl(study.id)}?v=${study.points}`} alt="" className="h-full w-full object-cover" draggable={false} />
+                ) : (
+                  <div className="grid h-full place-items-center text-3xl text-ink-500">≋</div>
+                )}
+              </div>
+              <div className="space-y-0.5 p-3">
+                <p className="truncate font-medium text-ink-50">{study.name}</p>
+                <p className="text-xs text-ink-300">
+                  {study.kind === 'series' && study.parameter
+                    ? t('library.study.series', { parameter: t(`series.parameter.${study.parameter}` as MessageKey), count: study.points, planned: study.planned })
+                    : study.cd !== null
+                      ? t('library.study.coefficients', { cd: num(study.cd, 3), cl: num(study.cl ?? 0, 3) })
+                      : t('study.kind.single')}
+                </p>
+                <p className="flex gap-2 text-xs">
+                  {study.status ? <span className={STATUS_TONE[study.status]}>{t(`tunnel.status.${study.status}` as MessageKey)}</span> : null}
+                  {study.state === 'running' ? <span className="text-warn">{t('series.state.running')}</span> : null}
+                  <span className="truncate text-ink-300">{study.model_name ?? study.profile_name}</span>
+                  {study.read_only ? <span className="text-warn">{t('library.model.readOnly')}</span> : null}
+                </p>
+                <p className="text-xs text-ink-400">{new Date(study.created_at).toLocaleString('it-IT')}</p>
+              </div>
+            </Link>
+            <label className="absolute top-2 left-2 flex items-center gap-1 rounded bg-ink-950/80 px-1.5 py-0.5 text-xs text-ink-200">
+              <input type="checkbox" checked={chosen.includes(study.id)} onChange={() => toggle(study.id)} aria-label={t('library.studies.choose', { name: study.name })} />
+              {t('library.studies.compareShort')}
+            </label>
+            <button
+              className="absolute top-2 right-2 hidden rounded bg-ink-950/80 px-2 py-0.5 text-xs text-ink-200 group-hover:block hover:text-danger focus:block"
+              onClick={() => setToDelete(study)}
+              aria-label={t('library.delete', { name: study.name })}
+            >
+              {t('common.delete')}
+            </button>
+          </li>
+        ))}
+      </ul>
+      {toDelete ? (
+        <Dialog
+          title={t('library.delete', { name: toDelete.name })}
+          onClose={remove.isPending ? undefined : () => setToDelete(null)}
+          actions={
+            <>
+              <Button onClick={() => setToDelete(null)} disabled={remove.isPending}>
+                {t('common.cancel')}
+              </Button>
+              <Button kind="danger" onClick={() => remove.mutate(toDelete.id)} disabled={remove.isPending}>
+                {t('common.delete')}
+              </Button>
+            </>
+          }
+        >
+          <p>{t('study.delete.body', { size: bytes(toDelete.size_bytes) })}</p>
           {remove.isError ? <ErrorNotice error={remove.error} /> : null}
         </Dialog>
       ) : null}

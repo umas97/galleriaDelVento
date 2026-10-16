@@ -44,3 +44,44 @@ input,
 textarea {
   user-select: text;
 }
+
+/* The report (SPEC §11.6) is paper, whatever the theme: the same tokens, light. */
+.paper {
+  --color-ink-950: #ffffff;
+  --color-ink-900: #fbfbfb;
+  --color-ink-850: #f5f5f5;
+  --color-ink-800: #eeeeee;
+  --color-ink-700: #d9d9d9;
+  --color-ink-600: #c8c8c8;
+  --color-ink-500: #b0b0b0;
+  --color-ink-400: #8a8a8a;
+  --color-ink-300: #5c5c5c;
+  --color-ink-200: #3a3a3a;
+  --color-ink-100: #222222;
+  --color-ink-50: #111111;
+  --color-accent: #2f5fc8;
+  --color-warn: #8a5a00;
+  --color-danger: #b02a2a;
+  --color-ok: #2b7a2b;
+  background: #ffffff;
+  color: #222222;
+  user-select: text;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+  html,
+  body,
+  #root {
+    height: auto;
+    background: #ffffff;
+  }
+  /* Colours of the pictures and badges as they are. */
+  * {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}

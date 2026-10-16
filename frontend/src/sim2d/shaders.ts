@@ -371,3 +371,22 @@ void main() {
   oColor = vec4(mean.y, mean.z, mean.w, solidCells > 0.5 * float(uFactor * uFactor) ? 1.0 : 0.0);
 }
 `
+
+/**
+ * Time averages (SPEC §11.1): adds the current (δρ, ux, uy) of every cell to a
+ * running sum, with the number of samples in the fourth channel.
+ */
+export const ACCUM_FS = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2D;
+uniform sampler2D uC;
+uniform sampler2D uSum;
+out vec4 oColor;
+
+void main() {
+  ivec2 q = ivec2(gl_FragCoord.xy);
+  vec4 c = texelFetch(uC, q, 0);
+  oColor = texelFetch(uSum, q, 0) + vec4(c.y, c.z, c.w, 1.0);
+}
+`

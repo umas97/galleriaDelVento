@@ -17,7 +17,7 @@ import {
   upload,
   type Program,
 } from './gl'
-import { DOWNSAMPLE_FS, FORCES_FS, READOUT_FS, REDUCE_FS, REMASK_FS, STEP_FS } from './shaders'
+import { ACCUM_FS, DOWNSAMPLE_FS, FORCES_FS, READOUT_FS, REDUCE_FS, REMASK_FS, STEP_FS } from './shaders'
 
 export type LatticeParams = {
   nx: number
@@ -101,6 +101,11 @@ export class Solver {
   private readonly reader: AsyncReader<{ step: number; cells: number }>
   private down: { tex: WebGLTexture; fb: WebGLFramebuffer; w: number; h: number; factor: number } | null = null
   private readonly downReader: AsyncReader<{ w: number; h: number; factor: number; step: number }>
+  private readonly accumProgram: Program
+  /** Running sums of (δρ, ux, uy, samples), ping-pong (SPEC §11.1). */
+  private sums: { tex: WebGLTexture; fb: WebGLFramebuffer }[]
+  /** Samples in the sums. */
+  meanSamples = 0
 
   constructor(
     readonly gl: WebGL2RenderingContext,
@@ -123,6 +128,12 @@ export class Solver {
     this.reduceProgram = program(gl, REDUCE_FS)
     this.readoutProgram = program(gl, READOUT_FS)
     this.downProgram = program(gl, DOWNSAMPLE_FS)
+    this.accumProgram = program(gl, ACCUM_FS)
+    const sum = () => {
+      const tex = texture(gl, nx, ny, 'rgba32f')
+      return { tex, fb: framebuffer(gl, [tex]) }
+    }
+    this.sums = [sum(), sum()]
     this.vao = gl.createVertexArray()!
     let w = nx
     let h = ny
@@ -333,6 +344,60 @@ export class Solver {
     return { drho, ux, uy, f }
   }
 
+  /** Add the current state to the time averages. */
+  accumulate(): void {
+    const gl = this.gl
+    const p = this.accumProgram
+    gl.useProgram(p.program)
+    bindTextures(gl, p, { uC: this.sets[0].c, uSum: this.sums[0].tex })
+    this.draw(this.sums[1].fb, this.params.nx, this.params.ny)
+    this.sums.reverse()
+    this.meanSamples++
+  }
+
+  /** The time averages start again. */
+  resetMean(): void {
+    const gl = this.gl
+    for (const s of this.sums) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, s.fb)
+      gl.clearBufferfv(gl.COLOR, 0, [0, 0, 0, 0])
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+    this.meanSamples = 0
+  }
+
+  /**
+   * The sums of (δρ, ux, uy, samples) per cell, read back through a pixel-pack
+   * buffer and a fence (no stall); null if the context is lost meanwhile.
+   */
+  async readMean(): Promise<Float32Array | null> {
+    const gl = this.gl
+    const { nx, ny } = this.params
+    const buffer = gl.createBuffer()!
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, buffer)
+    gl.bufferData(gl.PIXEL_PACK_BUFFER, nx * ny * 16, gl.STREAM_READ)
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.sums[0].fb)
+    gl.readBuffer(gl.COLOR_ATTACHMENT0)
+    gl.readPixels(0, 0, nx, ny, gl.RGBA, gl.FLOAT, 0)
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null)
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null)
+    const fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0)!
+    gl.flush()
+    while (true) {
+      await new Promise((r) => setTimeout(r, 8))
+      if (gl.isContextLost()) return null
+      const status = gl.clientWaitSync(fence, 0, 0)
+      if (status === gl.ALREADY_SIGNALED || status === gl.CONDITION_SATISFIED) break
+    }
+    const data = new Float32Array(nx * ny * 4)
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, buffer)
+    gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, data)
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null)
+    gl.deleteSync(fence)
+    gl.deleteBuffer(buffer)
+    return data
+  }
+
   /** Back to a fluid at rest, step 0 (R: "Ricomincia"). */
   restart(): void {
     const gl = this.gl
@@ -345,6 +410,7 @@ export class Solver {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null)
     this.reader.collect()
     this.downReader.collect()
+    this.resetMean()
     this.step = 0
   }
 
@@ -372,10 +438,14 @@ export class Solver {
       gl.deleteTexture(this.down.tex)
     }
     if (this.cellsTexture) gl.deleteTexture(this.cellsTexture)
+    for (const s of this.sums) {
+      gl.deleteFramebuffer(s.fb)
+      gl.deleteTexture(s.tex)
+    }
     gl.deleteTexture(this.mask)
     gl.deleteTexture(this.spareMask)
     gl.deleteVertexArray(this.vao)
-    for (const p of [this.stepProgram, this.remaskProgram, this.forcesProgram, this.reduceProgram, this.readoutProgram, this.downProgram])
+    for (const p of [this.stepProgram, this.remaskProgram, this.forcesProgram, this.reduceProgram, this.readoutProgram, this.downProgram, this.accumProgram])
       gl.deleteProgram(p.program)
   }
 }

@@ -30,7 +30,7 @@ type State =
   | { step: 'unsupported'; name: string; kind: FileKind }
   | { step: 'error'; name: string; error: unknown }
 
-const ACCEPT = '.stl,.obj,.svg,.dxf,.jpg,.jpeg,.png,.webp'
+const ACCEPT = '.stl,.obj,.svg,.dxf,.jpg,.jpeg,.png,.webp,.json'
 
 const ANALYSING: Partial<Record<FileKind, MessageKey>> = {
   mesh: 'import.analysing',
@@ -55,6 +55,18 @@ export function ImportProvider({ children }: { children: ReactNode }) {
           const info = await api.importSketch(file, (progress) => setState({ step: 'uploading', name: file.name, progress, kind }))
           setState({ step: 'idle' })
           navigate(`/schizzi/${info.id}`)
+        } catch (error) {
+          setState({ step: 'error', name: file.name, error })
+        }
+        return
+      }
+      if (kind === 'study') {
+        setState({ step: 'uploading', name: file.name, progress: 0, kind })
+        try {
+          const study = await api.importStudy(file, (progress) => setState({ step: 'uploading', name: file.name, progress, kind }))
+          await queryClient.invalidateQueries({ queryKey: ['studies'] })
+          setState({ step: 'idle' })
+          navigate(`/studi/${study.id}`)
         } catch (error) {
           setState({ step: 'error', name: file.name, error })
         }

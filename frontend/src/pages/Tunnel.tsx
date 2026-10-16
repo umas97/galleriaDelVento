@@ -89,6 +89,8 @@ function ProfileBench({ profile }: { profile: Profile2D }) {
       freshChamber: true,
       depthKey: 0,
       sectionInfo: null,
+      profileId: profile.id,
+      model: profile.source.kind === 'section3d' ? { id: profile.source.model_id, name: profile.source.model_name } : null,
     }
   }, [profile])
   const initial = useMemo(() => baseCase({ speed: rememberedCase().speed ?? 15 }), [])
@@ -142,6 +144,7 @@ function ModelBench({ model, preset }: { model: ModelRecord; preset: StudyTypePr
   // PgUp/PgDn: depth ±1% (Shift ±0.1%), SPEC §12.2.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (lockedRef.current) return
       const step = event.shiftKey ? 0.001 : 0.01
       if (event.key === 'PageUp') moveDepth(fractionRef.current + step)
       else if (event.key === 'PageDown') moveDepth(fractionRef.current - step)
@@ -230,6 +233,8 @@ function ModelBench({ model, preset }: { model: ModelRecord; preset: StudyTypePr
         roll: num(roll, 1),
         tilt: num(tilt, 1),
       }),
+      profileId: null,
+      model: { id: model.id, name: model.name },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the envelope follows the index
     [result, info, released, depthKey, draft, defaultName],
@@ -240,13 +245,69 @@ function ModelBench({ model, preset }: { model: ModelRecord; preset: StudyTypePr
     setReleased((r) => ({ ...r, roll, tilt, fresh: false }))
   }
 
+  /** The current cut, as a profile in the library; the same cut is saved once. */
+  const savedCut = useRef<{ key: string; id: string; name: string } | null>(null)
+  const cutKey = `${plane}:${fraction}:${roll}:${tilt}`
   const save = async (name: string) => {
     setNaming(false)
     const fine = await live.snapshot(cell / SAVE_DETAIL)
-    if (!fine?.loops.length) return
+    if (!fine?.loops.length) return null
     const profile = await saver.save(draft(name, fine.loops, fine.repaired), { kind: 'create' }, fine.repaired ? fine.rawLoops ?? undefined : undefined)
-    if (profile) setSaved({ id: profile.id, name: profile.name })
+    if (!profile) return null
+    setSaved({ id: profile.id, name: profile.name })
+    savedCut.current = { key: cutKey, id: profile.id, name: profile.name }
+    return { id: profile.id, name: profile.name }
   }
+  // «Salva studio» on a live section saves it first, named as SPEC §11.2 says.
+  const saveSection = async () => (savedCut.current?.key === cutKey ? savedCut.current : save(defaultName))
+
+  // A depth series point (SPEC §11.3): the section at `f`, cut like the live one.
+  const latestCut = useRef({ live, plane, roll, tilt, cell, model })
+  latestCut.current = { live, plane, roll, tilt, cell, model }
+  const depthCut = useCallback(async (f: number) => {
+    const { live: l, plane: p, roll: r, tilt: tl, cell: c, model: m } = latestCut.current
+    const box = l.index?.info
+    if (!box) return null
+    setFraction(f)
+    const depth = box.depthMin + f * (box.depthMax - box.depthMin)
+    const cut = await l.cutAt(depth, c)
+    if (!cut) return null
+    const name = t('section.saveName', {
+      model: m.name,
+      plane: t(p === 'vertical' ? 'section.plane.name.vertical' : 'section.plane.name.horizontal'),
+      percent: num(f * 100, 1),
+    })
+    const sectionDraft: ProfileDraft = {
+      name,
+      loops: cut.loops.map((points) => ({ points })),
+      spline: null,
+      source: {
+        kind: 'section3d',
+        model_id: m.id,
+        model_name: m.name,
+        placement: m.placement,
+        plane: p,
+        depth_m: depth,
+        depth_fraction: f,
+        incidence_deg: 0,
+        roll_deg: r,
+        tilt_deg: tl,
+        repaired: cut.repaired,
+      },
+    }
+    return { loops: cut.loops, draft: sectionDraft }
+  }, [])
+
+  // The mini-scene, model and plane, for the report (SPEC §11.6).
+  const captureScene = useCallback(async () => {
+    const canvas = document.querySelector<HTMLCanvasElement>('[data-testid="tunnel-scene"] canvas')
+    if (!canvas) return null
+    return new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
+  }, [])
+  const lockedRef = useRef(false)
+  const onLocked = useCallback((on: boolean) => {
+    lockedRef.current = on
+  }, [])
 
   const modelMatrix = useMemo(() => {
     const [cx, cy, cz] = view.data ? view.data.header.bbox_min.map((v, i) => (v + view.data!.header.bbox_max[i]) / 2) : [0, 0, 0]
@@ -375,6 +436,10 @@ function ModelBench({ model, preset }: { model: ModelRecord; preset: StudyTypePr
       modelPanel={panel}
       onPlan={setPlan}
       onPlacement={onPlacement}
+      saveSection={saveSection}
+      depthCut={depthCut}
+      captureScene={captureScene}
+      onLocked={onLocked}
     />
   )
 }
