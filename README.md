@@ -107,6 +107,9 @@ uv run python tests/bench/bench_sketch.py   # sketch pipeline, <= 400 ms per upd
 cd frontend && node tests/bench/slicer.bench.mjs   # section index and cut in the worker, 1 M triangles
 cd frontend && node tests/bench/tunnel.bench.mjs   # tunnel steps/s and fps on the real GPU
 cd frontend && node tests/bench/series.bench.mjs   # an 11-incidence series, <= 7 min
+cd frontend && node tests/bench/tunnel3d.bench.mjs  # 3D solver steps/s at the presets (WebGPU)
+cd frontend && node tests/bench/voxelize.bench.mjs  # voxels of a 1 M-triangle model, <= 2 s
+uv run python tests/bench/bench_taumin3d.py         # smallest stable tau of the 3D solver
 ```
 
 GPU and timing numbers depend on the power profile: measure on mains power, not in
@@ -137,15 +140,19 @@ backend/gdv/
                      contract, its validation and repair; SVG/DXF import, DXF/SVG export;
                      raster2d.py, the reference mask of the solver; sketch/, the photo of a
                      hand sketch -> profile (sheet, thresholding, outline; OpenCV)
-  physics/           fluid properties, the planner (CaseSetup -> CasePlan), real forces
+  physics/           fluid properties, the planners (CaseSetup -> CasePlan, and the 3D
+                     tunnel's CaseSetup3D -> CasePlan3D), real forces
   studies/           SimulationResult and studies on disk, mean fields, CSV/VTK exports,
                      comparison, the PDF report (headless Chrome)
   lattice.py         D2Q9 constants and MRT matrices, the single source of the shader's ones
+  lattice3d.py       the same for D3Q19 (the 3D tunnel)
   static/            the interface served by the server (built from frontend/)
 frontend/src/
   pages/             screens (Library, ModelSetup, Section, ProfileEditor, Tunnel, Study,
                      Compare, Report, ...)
   sim2d/             the GPU solver (WebGL2 shaders), mask, views, forces, series, streamlines
+  sim3d/             the 3D tunnel: D3Q19 solver in WebGPU compute shaders (WGSL written out
+                     from the generated constants), voxels of the model
   tunnel/            the tunnel screen (conditions, results, top bar), saving studies, series
   study/             how a saved result reads: conditions, coefficients, charts, fields
   charts/            uPlot charts (coefficient history, Cp on the contour, probes, curves)
@@ -160,9 +167,11 @@ frontend/src/
                      theme
   i18n/it.ts         every user-visible string (it.guide.ts: the guide's texts, spread in)
 packaging/           icons and their generator
-scripts/             gen_lattice_ts.py: writes frontend/src/sim2d/lattice.generated.ts
-tests/               pytest; tests/reference/ the Numba reference solver; tests/bench/ for the
-                     SPEC §17 measurements (slow physics validation: pytest -m slow)
+scripts/             gen_lattice_ts.py: writes frontend/src/sim2d/lattice.generated.ts and
+                     frontend/src/sim3d/lattice3d.generated.ts
+tests/               pytest; tests/reference/ the Numba reference solvers (2D and 3D);
+                     tests/bench/ for the SPEC §17 measurements (slow physics validation:
+                     pytest -m slow)
 docs/SPEC.md         the specification
 ```
 

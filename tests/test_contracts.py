@@ -20,7 +20,7 @@ from pydantic import BaseModel
 
 from gdv.geometry import profile
 from gdv.geometry.sketch import params as sketch_params
-from gdv.physics import coefficients, fluids, planner
+from gdv.physics import coefficients, fluids, planner, planner3d
 from gdv.studies import compare, result, store
 
 TYPES_TS = Path(__file__).resolve().parents[1] / "frontend" / "src" / "lib" / "types.ts"
@@ -43,6 +43,8 @@ CONTRACTS: list[type[BaseModel]] = [
     planner.CaseSetup,
     planner.PlanTexts,
     planner.CasePlan,
+    planner3d.CaseSetup3D,
+    planner3d.CasePlan3D,
     fluids.FluidProperties,
     coefficients.Stat,
     coefficients.Coefficients,

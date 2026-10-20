@@ -24,8 +24,10 @@ window.addEventListener('unhandledrejection', (event) => {
   reportError('unhandledrejection', reason instanceof Error ? `${reason.name}: ${reason.message}\n${reason.stack ?? ''}` : String(reason))
 })
 
-// Test 25 only (see sim2d/selftest.ts): never reached from the interface.
-if (new URLSearchParams(window.location.search).has('selftest')) void import('./sim2d/selftest')
+// Tests 25 and 39 only (see sim2d/selftest.ts, sim3d/selftest.ts): never reached from the interface.
+const query = new URLSearchParams(window.location.search)
+if (query.has('selftest')) void import('./sim2d/selftest')
+if (query.has('selftest3d')) void import('./sim3d/selftest')
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

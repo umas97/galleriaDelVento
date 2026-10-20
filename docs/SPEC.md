@@ -14,10 +14,11 @@ didattico e di curiosità tecnica**, per un solo utente (lo sviluppatore stesso,
 cultura tecnica): le grandezze fisiche sono esposte (Re, Ma, risoluzione, τ), le spiegazioni
 stanno in tooltip brevi, non c'è una modalità «lezione».
 
-**Le simulazioni sono sempre 2D.** Un modello 3D si importa per *ricavarne sezioni*: l'utente lo
+**La galleria principale è 2D.** Un modello 3D si importa per *ricavarne sezioni*: l'utente lo
 ruota e lo riposiziona nella camera di prova, **scorre il piano di taglio nella profondità del
 modello**, e la galleria simula la sezione corrente, aggiornandosi dal vivo mentre il piano si
-sposta.
+sposta. In più, a programma 2D finito, una **galleria 3D** a griglia grossolana simula il
+modello intero (Fase 7, §24: approvata dall'utente il 2026-10-20).
 
 Il programma deve:
 
@@ -42,8 +43,9 @@ Reynolds, indicativa oltre.
 
 ### Non-obiettivi (v1)
 
-- **Nessuna simulazione 3D**, in nessuna forma: niente solutore 3D, niente voxelizzazione,
-  niente forze sull'oggetto 3D intero. Decisione dell'utente.
+- **Nessuna simulazione 3D oltre alla galleria 3D di §24**: le sezioni, i profili, gli studi e
+  le serie restano 2D. La galleria 3D (Fase 7) è a griglia grossolana e a scopo didattico, non
+  una CFD 3D.
 - **Nessuna CFD ingegneristica**: niente RANS, niente mesh conformi, niente OpenFOAM. I
   coefficienti a Reynolds reali (10⁵–10⁷) sono indicativi (§2.3, §9).
 - **Niente flusso comprimibile**: oltre Mach 0,3 il programma avvisa e non estrapola.
@@ -51,7 +53,8 @@ Reynolds, indicativa oltre.
   sposta e ruota solo a mano.
 - **Niente formati CAD solidi** (STEP/IGES), niente glTF/PLY/3MF: solo STL e OBJ.
 - **Niente generatore NACA nell'interfaccia** (i profili NACA esistono solo nei test, §18).
-- Niente WebGPU, nessuna modalità didattica guidata, nessuna lingua oltre l'italiano.
+- Niente WebGPU per la galleria 2D (WebGPU serve solo alla galleria 3D, §24), nessuna modalità
+  didattica guidata, nessuna lingua oltre l'italiano.
 - Nessuna rete, nessun account, nessun cloud (§2.2).
 
 ---
@@ -233,7 +236,9 @@ grandi (fino a 500 MB) con validazione.
 
 ### Decisioni prese (non riaprirle)
 
-1. **Simulazioni sempre 2D.** Il 3D serve solo a ricavare sezioni; non esiste un solutore 3D.
+1. **Simulazioni 2D, più la galleria 3D di §24.** Il 3D serve a ricavare sezioni; la galleria
+   3D (Fase 7, D3Q19 su WebGPU) simula il modello intero a griglia grossolana, senza toccare la
+   galleria 2D (decisione dell'utente, 2026-10-20).
 2. **Lattice Boltzmann D2Q9 su GPU nel frontend**: si implementa bene con shader su griglie
    cartesiane, non richiede mesh conformi (si rasterizza qualunque contorno) e gestisce bene i
    flussi instazionari (scie, vortici di von Kármán). La risposta al mouse deve stare in un
@@ -278,8 +283,10 @@ galleriaDelVento/
 │   ├── physics/
 │   │   ├── fluids.py          proprietà di aria e acqua in funzione di T
 │   │   ├── planner.py         CaseSetup → CasePlan (§9)
+│   │   ├── planner3d.py       CaseSetup3D → CasePlan3D (§24.3)
 │   │   └── coefficients.py    forze reticolari → coefficienti → forze reali
 │   ├── lattice.py             costanti D2Q9 + matrice MRT (fonte unica, §10.2)
+│   ├── lattice3d.py           costanti D3Q19 + matrice MRT (fonte unica, §24.3)
 │   └── studies/
 │       ├── store.py           salvataggio/lettura studi
 │       ├── export_csv.py, export_vtk.py
@@ -291,13 +298,16 @@ galleriaDelVento/
 │   ├── sim2d/    gl.ts, shaders/*.glsl, solver.ts, mask.ts, forces.ts,
 │   │             render.ts, smoke.ts, particles.ts, streamlines.ts, probes.ts,
 │   │             series.ts, lattice.generated.ts
+│   ├── sim3d/    gpu.ts, shaders.ts (WGSL), solver.ts, voxelize.ts,
+│   │             lattice3d.generated.ts (§24)
 │   ├── scene3d/  ModelScene, ModelMesh, CutPlane, RotateGizmo
 │   ├── charts/   TimeSeries, Polar, CpCurve, DepthCurve (uPlot)
 │   ├── lib/      api.ts, types.ts
 │   └── i18n/it.ts
-├── scripts/gen_lattice_ts.py  genera sim2d/lattice.generated.ts da gdv/lattice.py
+├── scripts/gen_lattice_ts.py  genera sim2d/lattice.generated.ts e sim3d/lattice3d.generated.ts
 └── tests/
     ├── reference/lbm2d.py     solutore di riferimento in Numba (§10.8)
+    ├── reference/lbm3d.py     solutore di riferimento 3D in Numba (§24.4)
     └── … (pytest) + frontend/tests/ (vitest, playwright)
 ```
 
@@ -1304,6 +1314,9 @@ STATO.md.
 - **Fase 6 — Rifinitura**: impostazioni persistenti complete, scorciatoie e `?`, tooltip, tema
   scuro, errori dedicati, perdita del contesto WebGL, misure finali di §17, README.
   *Accettazione*: test 32, 34; tutte le misure di §17 rispettate o discusse.
+- **Fase 7 — Galleria 3D** (§24): 7a solutore e validazione, 7b galleria, 7c numeri e studi, con
+  una revisione dell'utente alla fine di ciascuna. *Accettazione*: test 35–42 (§24.4) e le misure
+  di §24.4.
 
 ---
 
@@ -1350,11 +1363,8 @@ licenza prima di aggiungerla.
 - **Più oggetti indipendenti nella camera** (due auto in scia, ciclista dietro un'auto, edifici
   vicini), ognuno con posizione e incidenza proprie e forze separate. In v1 la camera ospita un
   solo `Profile2D` per caso: più corpi si ottengono già con un profilo multi-anello.
-- **Simulazione 3D di modelli completi** (richiesta dell'utente, 2026-10-20): una galleria che
-  simuli il modello 3D intero, non solo le sue sezioni. Oggi è un non-obiettivo (§1, §4
-  decisione 1): l'utente la vuole **come ultima cosa, solo a programma 2D finito e funzionante**.
-  Le risposte dell'utente alle domande di progetto sono in §24 (bozza della Fase 7, da
-  approvare); nel frattempo i non-obiettivi restano validi.
+- **Simulazione 3D di modelli completi** (richiesta dell'utente, 2026-10-20): è la Fase 7 (§24),
+  approvata dall'utente il 2026-10-20 con proposte tecniche, test e ordine dei lavori.
 - **Incidenza oltre ±90°** (direzione del vento su 360° per gli edifici in pianta): in v1 resta
   ±90° (decisione dell'utente, 2026-10-15); le altre direzioni si ottengono ruotando il modello.
 
@@ -1369,12 +1379,10 @@ licenza prima di aggiungerla.
 
 ---
 
-## 24. Fase 7 — Galleria 3D (BOZZA da approvare, 2026-10-20)
+## 24. Fase 7 — Galleria 3D (approvata il 2026-10-20)
 
-> Stato: **bozza**. Raccoglie le risposte dell'utente del 2026-10-20; finché l'utente non la
-> approva valgono i non-obiettivi di §1 e la decisione 1 di §4, e non si scrive codice della
-> Fase 7. Con l'approvazione, §1 e §4 si aggiornano di conseguenza («simulazioni 2D, più la
-> galleria 3D di §24»).
+> Stato: **approvata** dall'utente il 2026-10-20 («ti approvo tutte le proposte tecniche, test e
+> ordine dei lavori»); §1 e §4 aggiornati. Le scelte fatte durante la 7a sono in §24.6.
 
 ### 24.1 Obiettivo
 
@@ -1403,7 +1411,7 @@ invarianti di §2 (file dell'utente intatti, nessuna rete, nessun numero senza c
 7. **Salvataggi**: istantanea PNG e video WebM; **studi 3D** (elenco Studi, confronto tra studi
    3D); export **VTK** del campo medio 3D (`.vti`); **report PDF**.
 
-### 24.3 Proposte tecniche (da confermare)
+### 24.3 Scelte tecniche (approvate)
 
 - **Solutore**: D3Q19, collisione MRT (d'Humières 2002) con Smagorinsky come nel 2D, float32,
   popolazioni come deviazione dal peso, passo fuso stream + collide in schema pull, due buffer
@@ -1434,20 +1442,72 @@ invarianti di §2 (file dell'utente intatti, nessuna rete, nessun numero senza c
   ne simula ~10³), con una spiegazione adatta alla scuola; «Griglia grossolana: i dettagli più
   piccoli di una cella non esistono per il flusso».
 
-### 24.4 Test e accettazione (proposta)
+### 24.4 Test e accettazione
 
-- Costanti D3Q19 generate e confrontate (come test 20); solutore di riferimento 3D in Numba su
-  una griglia piccola (32³) contro lo shader WGSL (come test 25).
-- Validazione fisica (`-m slow`): sfera a Re 20 (Cd di riferimento ≈ 2,6) e a Re 100 (≈ 1,09),
-  con la correzione di bloccaggio, entro il 15% alla risoluzione Normale; canale quadrato di
-  Poiseuille.
-- Voxelizzazione (vitest): sfera, cubo, toro, cubo con un buco.
-- E2E: modello → galleria 3D → fumo, particelle, piano, Cp in superficie → studio salvato →
-  report; zero errori in console; test 4 (nessuna rete) con una sessione 3D.
-- Misure: ≥ 30 fps a Normale con fumo e particelle; voxelizzazione di 1 M triangoli ≤ 2 s.
+Numerati di seguito a §18:
 
-### 24.5 Ordine dei lavori (proposta)
+35. Costanti D3Q19: `lattice3d.generated.ts` corrisponde a `gdv/lattice3d.py`; matrici
+    coerenti (righe ortogonali, M⁻¹M = I), equilibri scritti a mano = momenti di `feq`.
+36. Pianificatore 3D: celle del preset, camera (1,5 L a monte, 3 L a valle, bloccaggio d'area),
+    similitudine e τ_min, pavimento (quota reale, varco sul nastro, corpo appoggiato), lunghezza
+    e area di riferimento cambiano solo i numeri di similitudine e la normalizzazione.
+37. Riferimento 3D — condotto quadrato di Poiseuille: errore L2 < 1% a 24 celle di lato contro la
+    soluzione in serie, livello di pressione fermo; instabilità forzata rilevata (come test 26).
+38. Riferimento 3D — sfera a Re 20 (Cd di riferimento 2,61) e a Re 100 (1,09; Schiller–Naumann),
+    con la correzione di bloccaggio, entro il 15% alla risoluzione Normale (`-m slow`).
+39. Shader WGSL contro riferimento (playwright, Chrome di sistema, WebGPU su SwiftShader): 500
+    passi su 32³, sfera libera, blocco sul pavimento mobile, blocco sul pavimento fisso con strato
+    limite: scarto relativo massimo della velocità < 10⁻³ e stesse forze.
+40. Voxelizzazione (vitest): sfera, cubo, toro, cubo con un buco (voto di maggioranza);
+    rotazioni, ingombro e area frontale del corpo ruotato.
+41. E2E (7b–7c): modello → galleria 3D → fumo, particelle, piano, Cp in superficie → studio
+    salvato → report; zero errori in console.
+42. Test 4 (nessuna rete) con una sessione 3D.
+
+Misure: ≥ 30 fps a Normale con fumo e particelle; voxelizzazione di 1 M triangoli ≤ 2 s.
+
+### 24.5 Ordine dei lavori
 
 7a solutore 3D e validazione senza interfaccia; 7b galleria 3D (resa, fumo, particelle, piano,
 Cp, camera, pavimento, preset); 7c numeri, studi 3D, confronto, VTK, PDF. Revisione dell'utente
 alla fine di ciascuna.
+
+### 24.6 Scelte fatte nella 7a (2026-10-20; da confermare alla revisione della 7a)
+
+- **Reticolo e collisione** (`gdv/lattice3d.py`): direzioni in coppie opposte (1–2, 3–4, …);
+  base dei momenti di d'Humières et al. (2002), righe ortogonali; equilibri dei momenti = momenti
+  dell'equilibrio del secondo ordine (la stessa scelta del 2D: con tempi tutti uguali la
+  collisione è BGK); tempi non idrodinamici di d'Humières: s_e 1,19, s_ε 1,4, s_q 1,2, s_π 1,4,
+  s_m 1,98; Smagorinsky con C_s 0,1 sul tensore completo delle sollecitazioni fuori equilibrio.
+- **Solutore WGSL** (`sim3d/`): un buffer di popolazioni per livello temporale, direzione per
+  direzione (`f[k·n + cella]`, 152 byte per cella e passo), corpo come maschera a bit; i prodotti
+  per M e M⁻¹ sono scritti per esteso dal generatore sulle sole voci non nulle, nello stesso
+  ordine del riferimento Numba (scarto misurato 2·10⁻⁷ sulla velocità). Pareti laterali e
+  soffitto a scorrimento libero specchiando le componenti che le attraversano. Misura ogni 8
+  passi con una riduzione per workgroup, letta in modo asincrono. Tipi di WebGPU dichiarati a mano
+  in `sim3d/webgpu.d.ts` (TypeScript 5.9 non li ha; un pacchetto di tipi sarebbe una dipendenza
+  nuova, da chiedere).
+- **Convenzioni del caso**: il modello ruota attorno al centro del suo ingombro, prima il
+  beccheggio attorno a y (positivo a cabrare), poi l'imbardata attorno a z (positiva in senso
+  antiorario vista dall'alto). L'interfaccia ruota la mesh e manda al pianificatore l'ingombro del
+  corpo ruotato e la sua area frontale (geometria, non fisica).
+- **Camera 3D**: 1,5 L a monte, 3 L a valle; sezione con lo stesso margine ai lati e sopra (e
+  sotto senza pavimento) tale che l'area frontale ne blocchi l'8% (10% per i veicoli), ma almeno
+  metà della dimensione più grande del corpo. **Nessuna camera lunga a basso Re** (a differenza
+  del 2D): sulla sfera a Re 20 e 100, portare il monte da 1,5 a 5 D cambia Cd del 2–3%, mentre il
+  bloccaggio da 8% a 2,2% lo cambia del 9–14%; allungare la camera costerebbe 3 volte le celle.
+- **Preset misurati sull'Iris Xe** (WebGPU su Vulkan, sfera): Bozza 0,51 M celle 689 passi/s;
+  **Normale 1,48 M celle 248 passi/s** (368 M celle/s, 1,5 s per tempo convettivo con D = 30
+  celle); Fine 4,0 M celle 92 passi/s. Il solutore è limitato dalla banda di memoria (la
+  dimensione del workgroup, 64–256, non cambia nulla). I preset restano 0,5 / 1,5 / 4 M.
+- **τ_min 3D = 0,502 con ogni pavimento**: misurato sulla GPU (Normale, 30.000 passi a caso)
+  sfera, cubo, auto a scatola sul nastro (a 2 o 3 celle, o appoggiata) ed edificio sul pavimento
+  fisso con strato limite reggono fino a 0,5005. Il pavimento fisso non chiede lo 0,504 del 2D.
+- **Varco sul pavimento mobile**: 3 celle come nel 2D (a una cella l'auto diverge al passo 1200;
+  a due regge).
+- **Area di riferimento dei coefficienti** = area frontale dei voxel (quella che il flusso
+  vede); l'area rasterizzata fine della mesh serve al pianificatore per dimensionare la camera.
+  L'interfaccia, dopo la voxelizzazione, ripianifica con `reference_area_m2` (stessa griglia).
+- **Validazione della sfera (test 38)**: con la correzione di bloccaggio per continuità
+  (Cd_c = Cd·(1 − A/C)²) la camera del pianificatore a Normale dà 2,86 a Re 20 (+9%) e 1,125 a
+  Re 100 (+3%). Se mostrare all'utente il Cd corretto o quello misurato è da decidere nella 7c.

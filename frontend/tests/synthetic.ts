@@ -123,9 +123,10 @@ export function taperedWing(span = 2, root = 1, tip = 0.4, stations = 12, n = 60
 
 /**
  * A unit cube on a grid with lines at `cuts` (fractions of the side), with one
- * small top cell removed: from (0.5, 0.5) to (0.505, 0.505).
+ * small top cell removed: from (0.5, 0.5) to (0.505, 0.505); `hole = false`
+ * keeps it, for the closed cube on the same grid.
  */
-export function cubeWithSmallHole(): Mesh {
+export function cubeWithSmallHole(hole = true): Mesh {
   const g = [0, 0.25, 0.5, 0.505, 0.75, 1]
   const b = new Builder()
   const faces: [(u: number, v: number) => [number, number, number], boolean][] = [
@@ -139,7 +140,7 @@ export function cubeWithSmallHole(): Mesh {
   faces.forEach(([at, flip], face) => {
     for (let i = 0; i + 1 < g.length; i++)
       for (let j = 0; j + 1 < g.length; j++) {
-        if (face === 1 && g[i] === 0.5 && g[j] === 0.5) continue // the hole
+        if (hole && face === 1 && g[i] === 0.5 && g[j] === 0.5) continue // the hole
         const v = [
           at(g[i], g[j]),
           at(g[i + 1], g[j]),

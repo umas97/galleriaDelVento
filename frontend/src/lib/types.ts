@@ -382,6 +382,81 @@ export type CasePlan = {
   texts: PlanTexts
 }
 
+// --- 3D cases (SPEC §24.3): CaseSetup3D → CasePlan3D -------------------------------
+// Mirrors backend/gdv/physics/planner3d.py; test 5 compares them.
+
+export type Point3 = [number, number, number]
+export type Box3 = [number, number, number, number, number, number]
+
+export type CaseSetup3D = {
+  model_id: string
+  name: string
+  pivot: Point3
+  model_size: Point3
+  body_box: Box3
+  frontal_area_m2: number
+  yaw_deg: number
+  pitch_deg: number
+  fluid: Fluid
+  temperature_c: number
+  speed: number
+  ground: Ground
+  inlet_profile: InletProfile
+  resolution: Resolution
+  reference_length: ReferenceLength
+  reference_area_m2: number | null
+  max_blockage: number
+  re_sim_scale: number
+}
+
+export type CasePlan3D = {
+  nx: number
+  ny: number
+  nz: number
+  dx: number
+  dt: number
+  length_m: number
+  width_m: number
+  height_m: number
+  offset: Point3
+  yaw_deg: number
+  pitch_deg: number
+  u_lat: number
+  tau: number
+  nu_lat: number
+  tau_min: number
+  smagorinsky_cs: number
+  re_real: number
+  re_sim: number
+  partial_similarity: boolean
+  mach: number
+  mach_warning: boolean
+  reference_kind: ReferenceKind
+  reference_length: number
+  l_lat: number
+  reference_area: number
+  a_lat: number
+  blockage: number
+  tc_steps: number
+  ramp_steps: number
+  transient_steps: number
+  max_steps: number
+  ground: Ground
+  floor_gap_m: number
+  inlet_profile: InletProfile
+  inlet_exponent: number
+  inlet_reference_cells: number
+  sponge_start: number
+  sponge_factor: number
+  sponge_damping: number
+  fluid: FluidProperties
+  speed: number
+  dynamic_pressure: number
+  force_per_coefficient: number
+  memory_mb: number
+  texts: PlanTexts
+}
+
 // --- results and studies (SPEC §11): the SimulationResult contract ------------------
 // Mirrors backend/gdv/studies/result.py, physics/coefficients.py and
 // studies/compare.py; test 5 compares them.
