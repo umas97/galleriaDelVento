@@ -61,7 +61,7 @@ export function rampedSpeed(step: number, p: LatticeParams): number {
   return Math.fround(Math.fround(p.uLat) * Math.fround(r))
 }
 
-/** One measurement: lattice units, at the end of step `step`. */
+/** One measurement: lattice units, at the end of step `step`; forces relative to ρ∞ / 3. */
 export type Sample = {
   step: number
   fx: number
@@ -77,7 +77,7 @@ export type Sample = {
 }
 
 type StateSet = { a: WebGLTexture; b: WebGLTexture; c: WebGLTexture; fb: WebGLFramebuffer }
-type Level = { w: number; h: number; s: WebGLTexture; t: WebGLTexture; fb: WebGLFramebuffer }
+type Level = { w: number; h: number; s: WebGLTexture; t: WebGLTexture; u: WebGLTexture; fb: WebGLFramebuffer }
 
 const GROUND = { none: 0, fixed: 1, moving: 2 } as const
 
@@ -140,7 +140,8 @@ export class Solver {
     do {
       const s = texture(gl, w, h, 'rgba32f')
       const t = texture(gl, w, h, 'rgba32f')
-      this.levels.push({ w, h, s, t, fb: framebuffer(gl, [s, t]) })
+      const u = texture(gl, w, h, 'rgba32f')
+      this.levels.push({ w, h, s, t, u, fb: framebuffer(gl, [s, t, u]) })
       w = Math.ceil(w / 4)
       h = Math.ceil(h / 4)
     } while (this.levels[this.levels.length - 1].w > 1 || this.levels[this.levels.length - 1].h > 1)
@@ -221,7 +222,7 @@ export class Solver {
     }
     if (this.cellsTexture) gl.deleteTexture(this.cellsTexture)
     this.cellsTexture = texture(gl, width, 1, 'rgba32f', coords)
-    const readWidth = 2 + this.cellCount
+    const readWidth = 3 + this.cellCount
     if (!this.readout || this.readout.width !== readWidth) {
       if (this.readout) {
         gl.deleteFramebuffer(this.readout.fb)
@@ -254,13 +255,13 @@ export class Solver {
       const src = this.levels[i - 1]
       const dst = this.levels[i]
       gl.uniform2i(r.uniform('uIn'), src.w, src.h)
-      bindTextures(gl, r, { uS: src.s, uT: src.t })
+      bindTextures(gl, r, { uS: src.s, uT: src.t, uU: src.u })
       this.draw(dst.fb, dst.w, dst.h)
     }
     const top = this.levels[this.levels.length - 1]
     const o = this.readoutProgram
     gl.useProgram(o.program)
-    bindTextures(gl, o, { uS: top.s, uT: top.t, uC: cur.c, uMask: this.mask, uCells: this.cellsTexture! })
+    bindTextures(gl, o, { uS: top.s, uT: top.t, uU: top.u, uC: cur.c, uMask: this.mask, uCells: this.cellsTexture! })
     const out = this.readout!
     this.draw(out.fb, out.width, 1)
     return this.reader.request(out.fb, out.width, 1, { step: this.step, cells: this.cellCount })
@@ -268,17 +269,21 @@ export class Solver {
 
   /** Measurements finished since the last call, oldest first. */
   collect(): Sample[] {
-    return this.reader.collect().map(({ tag, data }) => ({
-      step: tag.step,
-      fx: data[0],
-      fy: data[1],
-      mz: data[2],
-      nan: data[3],
-      rhoMin: data[4],
-      rhoMax: data[5],
-      rhoInf: data[7] > 0 ? data[6] / data[7] : 1,
-      cells: data.subarray(8, 8 + tag.cells * 4),
-    }))
+    return this.reader.collect().map(({ tag, data }) => {
+      const rhoInf = data[7] > 0 ? data[6] / data[7] : 1
+      return {
+        step: tag.step,
+        // Relative to the undisturbed pressure (see FORCES_FS).
+        fx: data[0] - rhoInf * data[8],
+        fy: data[1] - rhoInf * data[9],
+        mz: data[2] - rhoInf * data[10],
+        nan: data[3],
+        rhoMin: data[4],
+        rhoMax: data[5],
+        rhoInf,
+        cells: data.subarray(12, 12 + tag.cells * 4),
+      }
+    })
   }
 
   /** Ask for the field downsampled by `factor` (streamlines, colour scale). */
@@ -428,6 +433,7 @@ export class Solver {
       gl.deleteFramebuffer(l.fb)
       gl.deleteTexture(l.s)
       gl.deleteTexture(l.t)
+      gl.deleteTexture(l.u)
     }
     if (this.readout) {
       gl.deleteFramebuffer(this.readout.fb)

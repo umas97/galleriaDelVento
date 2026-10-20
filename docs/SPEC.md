@@ -752,7 +752,13 @@ modello non ne tiene conto».
 
 ### 9.5 Coefficienti e forze
 
-- **Forze** con il metodo dello **scambio di quantità di moto** sui collegamenti fluido–solido.
+- **Forze** con il metodo dello **scambio di quantità di moto** sui collegamenti fluido–solido,
+  **relative alla pressione indisturbata**: sugli stessi collegamenti si somma anche
+  S = Σ 2 w_k c_k (la spinta di un fluido fermo a densità 1) e si sottrae ρ∞ · S. Per un corpo
+  circondato dal fluido S è esattamente zero; per un corpo appoggiato al pavimento, la cui faccia
+  inferiore non è bagnata, toglie la pressione di fondo sul tetto (un edificio sul pavimento fisso
+  aveva Cl = −102 invece di ~2). Difetto trovato e corretto nella Fase 7a (2026-10-20, da
+  confermare alla revisione).
 - Coefficienti: `C = F_lat / (½ ρ_lat U_lat² · L_lat)`, con `ρ_lat` la **densità indisturbata
   misurata** (media della seconda colonna, ρ∞), non 1: con ingresso a velocità imposta il livello
   medio di densità dipende dalla storia del transitorio, e forze e pressioni lo seguono

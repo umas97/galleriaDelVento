@@ -15,6 +15,8 @@ export type SelfTestCase = {
   steps: number
   /** Optionally a second mask, set after `at` steps. */
   change?: { at: number; mask: number[] }
+  /** Moment reference of the forces returned, cells. */
+  forcesAbout?: [number, number]
 }
 
 function unpack(runs: number[], size: number): Uint8Array {
@@ -37,12 +39,22 @@ async function selfTest(c: SelfTestCase) {
   } else {
     solver.run(c.steps)
   }
+  // The forces at the last step, through the measurement the tunnel uses.
+  solver.measure(c.forcesAbout ?? [0, 0])
+  gl.flush() // the fence is sent with the next flush (in the tunnel, the frame's)
+  let sample: ReturnType<Solver['collect']>[number] | null = null
+  const deadline = performance.now() + 60_000 // SwiftShader takes seconds for 500 steps
+  while (!sample && performance.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 10))
+    sample = solver.collect()[0] ?? null
+  }
   const state = solver.readState()
   const ms = performance.now() - start
   const info = gl.getExtension('WEBGL_debug_renderer_info')
   const renderer = info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : ''
   solver.dispose()
-  return { ux: Array.from(state.ux), uy: Array.from(state.uy), drho: Array.from(state.drho), ms, renderer }
+  const forces = sample && { fx: sample.fx, fy: sample.fy, mz: sample.mz, rhoInf: sample.rhoInf, step: sample.step }
+  return { ux: Array.from(state.ux), uy: Array.from(state.uy), drho: Array.from(state.drho), forces, ms, renderer }
 }
 
 ;(window as unknown as { gdvSelfTest: typeof selfTest }).gdvSelfTest = selfTest

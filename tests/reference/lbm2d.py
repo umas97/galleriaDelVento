@@ -299,11 +299,16 @@ def _run(
 
 @nb.njit(cache=True)
 def _forces(f, mask, cx, cy, w, xr, yr):
-    """Momentum exchange on the body links: Fx, Fy, Mz (about xr, yr, cell units)."""
+    """Momentum exchange on the body links: Fx, Fy, Mz (about xr, yr, cell units),
+    then the same sums with the rest populations alone (what a fluid at rest with
+    unit density would push: zero unless the body touches a wall or the floor)."""
     ny, nx = mask.shape
     fx = 0.0
     fy = 0.0
     mz = 0.0
+    bx = 0.0
+    by = 0.0
+    bz = 0.0
     for j in range(ny):
         for i in range(nx):
             if mask[j, i]:
@@ -321,7 +326,11 @@ def _forces(f, mask, cx, cy, w, xr, yr):
                 rx = i + 0.5 + 0.5 * cx[k] - xr
                 ry = j + 0.5 + 0.5 * cy[k] - yr
                 mz += rx * ly - ry * lx
-    return fx, fy, mz
+                rest = 2.0 * float(w[k])
+                bx += rest * cx[k]
+                by += rest * cy[k]
+                bz += rx * rest * cy[k] - ry * rest * cx[k]
+    return fx, fy, mz, bx, by, bz
 
 
 @nb.njit(cache=True)
@@ -429,8 +438,12 @@ class Reference:
         self.mask = new
 
     def forces(self, xr: float = 0.0, yr: float = 0.0) -> tuple[float, float, float]:
-        """Fx, Fy, Mz on the body, lattice units (Mz about (xr, yr), cells)."""
-        return _forces(self.f, self.mask, _CX, _CY, _W, xr, yr)
+        """Fx, Fy, Mz on the body, lattice units (Mz about (xr, yr), cells), relative
+        to the undisturbed pressure ρ∞ / 3: a body standing on the floor is not
+        pushed down by the pressure of the fluid at rest (SPEC §9.5)."""
+        fx, fy, mz, bx, by, bz = _forces(self.f, self.mask, _CX, _CY, _W, xr, yr)
+        rho = self.rho_inf()
+        return fx - rho * bx, fy - rho * by, mz - rho * bz
 
     def rho_inf(self) -> float:
         """Undisturbed density: the mean over the fluid cells of column 1 (SPEC §9.5)."""

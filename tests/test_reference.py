@@ -56,6 +56,33 @@ def test_21_poiseuille_profile():
     assert ref.rho_inf() == pytest.approx(1.0, abs=0.05)  # the pressure level holds
 
 
+def test_a_body_on_the_floor_is_not_pushed_by_the_pressure_at_rest():
+    # A 20 × 20 block standing on a fixed floor: its underside is not wetted, so
+    # the momentum exchange alone includes the pressure of the fluid at rest on
+    # its roof (Cl was −102). Relative to ρ∞ the lift is the flow's: of order one
+    # and upward (suction over the roof, 1.93 at Re 80); a block in free air is
+    # unchanged, its rest sums are exactly zero.
+    nx, ny = 300, 120
+    on_floor = np.zeros((ny, nx), np.uint8)
+    on_floor[0:20, 80:100] = 1
+    ref = Reference(
+        LatticeCase(nx=nx, ny=ny, tau=0.56, u_lat=0.08, mask=on_floor, ramp_steps=1000,
+                    ground="fixed", sponge_start=276)
+    )  # fmt: skip
+    ref.run(6000)
+    cd, cl, _ = ref.coefficients(20, 90, 10)
+    assert 0.5 < cd < 3
+    assert 0 < cl < 3, cl
+    free = np.zeros((ny, nx), np.uint8)
+    free[50:70, 80:100] = 1
+    ref = Reference(LatticeCase(nx=nx, ny=ny, tau=0.56, u_lat=0.08, mask=free, ramp_steps=500))
+    ref.run(200)
+    from reference.lbm2d import _CX, _CY, _W, _forces
+
+    *_, bx, by, bz = _forces(ref.f, ref.mask, _CX, _CY, _W, 90.0, 60.0)
+    assert (bx, by, bz) == (0.0, 0.0, 0.0)
+
+
 # --- test 26: forced instability --------------------------------------------------------
 
 

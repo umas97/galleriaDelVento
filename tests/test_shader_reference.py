@@ -4,8 +4,10 @@
 
 500 steps on 256 × 96 in the system Chrome (``sim2d/selftest.ts``) and in
 ``tests/reference/lbm2d.py``, same case, same mask: the largest velocity gap,
-relative to the largest velocity, stays below 10⁻³. Repeated with a moving
-floor, and with the body moved half-way through (the live mask, SPEC §10.3).
+relative to the largest velocity, stays below 10⁻³, and the forces of the
+measurement at the last step agree. Repeated with a moving floor, with the body
+moved half-way through (the live mask, SPEC §10.3), and with a block standing
+on a fixed floor (forces relative to the undisturbed pressure, SPEC §9.5).
 Skipped -- saying why -- only when Chrome or the built interface is missing.
 """
 
@@ -85,8 +87,15 @@ def params(ground: str) -> dict:
     }
 
 
+def block_on_floor() -> np.ndarray:
+    mask = np.zeros((NY, NX), np.uint8)
+    mask[0:24, 60:76] = 1
+    return mask
+
+
 CASES = {
     "cylinder": {"ground": "none", "mask": cylinder(60, 48.3, 20)},
+    "block_on_fixed_floor": {"ground": "fixed", "mask": block_on_floor()},
     "moving_floor": {"ground": "moving", "mask": airfoil(50, 14, 4.0)},
     "mask_change": {
         "ground": "none",
@@ -95,6 +104,8 @@ CASES = {
     },
 }
 STEPS = 500
+#: Moment reference of the compared forces, cells.
+ABOUT = (64.0, 40.0)
 
 
 def reference(spec) -> Reference:
@@ -124,7 +135,12 @@ def shader(tmp_path_factory):
     folder = tmp_path_factory.mktemp("shader")
     payload = []
     for spec in CASES.values():
-        case = {"params": params(spec["ground"]), "mask": runs(spec["mask"]), "steps": STEPS}
+        case = {
+            "params": params(spec["ground"]),
+            "mask": runs(spec["mask"]),
+            "steps": STEPS,
+            "forcesAbout": list(ABOUT),
+        }
         if "change" in spec:
             case["change"] = {"at": spec["change"][0], "mask": runs(spec["change"][1])}
         payload.append(case)
@@ -152,3 +168,10 @@ def test_25_shader_matches_reference(name, shader):
     gap = float(np.max(np.hypot(ux - ref.ux, uy - ref.uy)))
     assert np.isfinite(ux).all() and np.isfinite(uy).all()
     assert gap / scale < 1e-3, (gap / scale, got["renderer"])
+    forces = got["forces"]
+    assert forces["step"] == STEPS
+    fx, fy, mz = ref.forces(*ABOUT)
+    size = max(abs(fx), abs(fy))
+    assert forces["fx"] == pytest.approx(fx, abs=1e-3 * size)
+    assert forces["fy"] == pytest.approx(fy, abs=1e-3 * size)
+    assert forces["mz"] == pytest.approx(mz, abs=1e-3 * size * 64)
