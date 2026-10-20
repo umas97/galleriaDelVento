@@ -41,6 +41,7 @@ def _missing() -> str | None:
         "phase4.e2e.mjs",
         "phase5.e2e.mjs",
         "phase6.e2e.mjs",
+        "phase7.e2e.mjs",
     ],
 )
 def test_e2e(script, tmp_path):

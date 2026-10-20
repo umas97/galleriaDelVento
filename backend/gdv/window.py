@@ -124,6 +124,13 @@ CHROME_OFFLINE_FLAGS: tuple[str, ...] = (
     "--google-base-url=http://127.0.0.1:9/",
     "--component-updater=url-source=http://127.0.0.1:9/",
     "--apps-gallery-update-url=http://127.0.0.1:9/",
+    # GCM, the push channel of Chrome's own services: its check-in on
+    # android.clients.google.com, seen behind test 4's proxy when a WebGPU page
+    # (the 3D tunnel) runs on the real GPU (2026-10-20); registration and the
+    # MCS connection would follow a check-in, so they are pointed away too.
+    "--gcm-checkin-url=http://127.0.0.1:9/",
+    "--gcm-registration-url=http://127.0.0.1:9/",
+    "--gcm-mcs-endpoint=http://127.0.0.1:9/",
     # Left: the updater's "activity reporter" has its URL compiled in and no
     # switch. It shows up on some launches; the barrier below makes it fail on
     # DNS, and test 4 accepts that one host only (decision of 2026-10-15).

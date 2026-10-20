@@ -62,6 +62,16 @@ the fluid (or use the middle button) to move, `+`/`-` to zoom, `0` or a double c
 fluid for the whole chamber. The zoom never touches the simulation. The model's mini-scene stays
 free during a series and can be enlarged over the tunnel.
 
+### The 3D tunnel
+
+"Galleria 3D" on a model's setup screen opens the whole model in a coarse 3D tunnel (D3Q19
+Lattice Boltzmann in WebGPU compute shaders, half a million to four million cells): smoke from a
+movable rake, particles, a cut plane coloured by speed or Cp, and Cp on the model's surface, seen
+from a free camera (drag to orbit, right button or Shift to pan, wheel to zoom, double click to
+go back). Speed, fluid, floor, resolution and the model's yaw and pitch restart the flow; the
+views and the camera never touch it. It needs WebGPU (Chrome on this machine has it): without,
+the page says so and the rest of the program works as before.
+
 ### Studies and exports
 
 "Salva studio" in the tunnel stores the current case with its conditions, the time-averaged
@@ -108,6 +118,7 @@ cd frontend && node tests/bench/slicer.bench.mjs   # section index and cut in th
 cd frontend && node tests/bench/tunnel.bench.mjs   # tunnel steps/s and fps on the real GPU
 cd frontend && node tests/bench/series.bench.mjs   # an 11-incidence series, <= 7 min
 cd frontend && node tests/bench/tunnel3d.bench.mjs  # 3D solver steps/s at the presets (WebGPU)
+cd frontend && node tests/bench/gallery3d.bench.mjs # 3D tunnel with every view: steps/s and fps, >= 30 fps at Normale
 cd frontend && node tests/bench/voxelize.bench.mjs  # voxels of a 1 M-triangle model, <= 2 s
 uv run python tests/bench/bench_taumin3d.py         # smallest stable tau of the 3D solver
 ```
@@ -148,11 +159,13 @@ backend/gdv/
   lattice3d.py       the same for D3Q19 (the 3D tunnel)
   static/            the interface served by the server (built from frontend/)
 frontend/src/
-  pages/             screens (Library, ModelSetup, Section, ProfileEditor, Tunnel, Study,
+  pages/             screens (Library, ModelSetup, Section, ProfileEditor, Tunnel, Tunnel3D, Study,
                      Compare, Report, ...)
   sim2d/             the GPU solver (WebGL2 shaders), mask, views, forces, series, streamlines
   sim3d/             the 3D tunnel: D3Q19 solver in WebGPU compute shaders (WGSL written out
-                     from the generated constants), voxels of the model
+                     from the generated constants), voxels of the model (in a worker), its own
+                     small WebGPU renderer (field texture, cut plane, surface Cp, smoke,
+                     particles), the orbit camera and the frame loop
   tunnel/            the tunnel screen (conditions, results, top bar), saving studies, series
   study/             how a saved result reads: conditions, coefficients, charts, fields
   charts/            uPlot charts (coefficient history, Cp on the contour, probes, curves)
@@ -203,6 +216,7 @@ All permissive licences, compatible with GPL-3.0-or-later.
 | tailwindcss, vite, typescript, vitest | MIT | build and tests (development only) |
 | uplot | MIT | live charts: coefficient history, Cp along the contour, probes |
 | playwright-core | Apache-2.0 | browser tests with the system Chrome (development only) |
+| @webgpu/types | BSD-3-Clause | TypeScript declarations of WebGPU for the 3D tunnel; no code in the bundle (development only) |
 | numba | BSD-2 | the CPU reference solver the shader is checked against (tests only) |
 | pillow | MIT-CMU | draws the icons; writes EXIF-rotated photos in the tests (development only) |
 

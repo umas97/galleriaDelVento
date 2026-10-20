@@ -117,7 +117,12 @@ soggetti**: il backend Python, il JavaScript della pagina e **il processo Chrome
   nessun flag spegne (ListAccounts, idoneità «Modalità AI», aggiornamento di componenti ed
   estensioni) si dirottano su `http://127.0.0.1:9/` con `--gaia-url`, `--google-base-url`,
   `--component-updater=url-source=…`, `--apps-gallery-update-url` (la porta 9 è nell'elenco
-  delle porte non sicure di Chrome: la richiesta fallisce prima di aprire un socket). Resta
+  delle porte non sicure di Chrome: la richiesta fallisce prima di aprire un socket). Dalla Fase
+  7b anche GCM, il canale push dei servizi di Chrome: la sua registrazione su
+  `android.clients.google.com` è comparsa nel test 4 quando la galleria 3D (WebGPU) gira sulla
+  GPU vera, anche in una finestra; `--gcm-checkin-url`, `--gcm-registration-url` e
+  `--gcm-mcs-endpoint` vanno sulla porta 9 (2026-10-20, da confermare alla revisione della 7b).
+  Come per le funzioni, un test verifica che ogni switch di dirottamento compaia nel binario. Resta
   l'«activity reporter» dell'updater, con l'URL scritto nel binario e senza flag: nella finestra
   fallisce sul DNS, e il test 4 accetta quell'unico host (decisione dell'utente).
   `--host-resolver-rules` e `--gaia-url` sono nell'elenco dei flag «non supportati» di Chrome,
@@ -294,13 +299,14 @@ galleriaDelVento/
 │       └── report.py          PDF via Chrome headless
 ├── frontend/src/
 │   ├── pages/    Library, ModelSetup, ProfileEditor, SketchWizard,
-│   │             Tunnel, Studies, Compare, Report, Settings
+│   │             Tunnel, Tunnel3D, Studies, Compare, Report, Settings
 │   ├── section/  slicer.worker.ts, slicer.ts (indice + taglio), loops.ts
 │   ├── sim2d/    gl.ts, shaders/*.glsl, solver.ts, mask.ts, forces.ts,
 │   │             render.ts, smoke.ts, particles.ts, streamlines.ts, probes.ts,
 │   │             series.ts, lattice.generated.ts
 │   ├── sim3d/    gpu.ts, shaders.ts (WGSL), solver.ts, voxelize.ts,
-│   │             lattice3d.generated.ts (§24)
+│   │             lattice3d.generated.ts, voxel.worker.ts, engine.ts, views.ts,
+│   │             viewShaders.ts (WGSL della resa), camera.ts, scene.ts (§24)
 │   ├── scene3d/  ModelScene, ModelMesh, CutPlane, RotateGizmo
 │   ├── charts/   TimeSeries, Polar, CpCurve, DepthCurve (uPlot)
 │   ├── lib/      api.ts, types.ts
@@ -1026,6 +1032,11 @@ Spazio avvia/pausa · R ricomincia · `.` passo singolo · 1–6 visualizzazione
 incidenza (Shift ±5°) · PagSu/PagGiù profondità ±1% (Shift ±0,1%) · S istantanea · V registra ·
 Ctrl+Z / Ctrl+Shift+Z nell'editor · Esc chiude dialoghi e pannelli. Elenco visibile con `?`.
 
+**Galleria 3D** (§24): Spazio, R, `.`, S, V come nel 2D · 1 velocità sul piano · 2 Cp sul piano ·
+3 Cp sulla superficie · 4 fumo · 5 particelle · 6 piano sì/no · PagSu/PagGiù sposta il piano di
+una cella (Maiusc: dieci) · trascinamento = gira attorno al modello, tasto destro o
+Maiusc+trascinamento = sposta, rotella e `+`/`−` = zoom, `0` o doppio clic = vista iniziale.
+
 **Vista della galleria** (anche con il flusso in corso e durante una serie: lo zoom non tocca la
 simulazione): rotella = zoom attorno al cursore (da 1× a 32×), trascinamento del fluido con
 «Sposta» o con il tasto centrale = sposta la vista, `+`/`−` zoom, `0` o doppio clic sul fluido =
@@ -1383,7 +1394,8 @@ licenza prima di aggiungerla.
 ## 24. Fase 7 — Galleria 3D (approvata il 2026-10-20)
 
 > Stato: **approvata** dall'utente il 2026-10-20 («ti approvo tutte le proposte tecniche, test e
-> ordine dei lavori»); §1 e §4 aggiornati. Le scelte fatte durante la 7a sono in §24.6.
+> ordine dei lavori»); §1 e §4 aggiornati. Le scelte fatte durante la 7a sono in §24.6, quelle
+> della 7b in §24.7.
 
 ### 24.1 Obiettivo
 
@@ -1513,3 +1525,62 @@ alla fine di ciascuna.
   (Cd_c = Cd·(1 − A/C)²) la camera del pianificatore a Normale dà 2,86 a Re 20 (+9%) e 1,125 a
   Re 100 (+3%). **Nella galleria 3D e nei risultati si mostra il Cd corretto** per il bloccaggio
   (decisione dell'utente, 2026-10-20), con il bloccaggio tra le condizioni (§2.3).
+
+### 24.7 Scelte fatte nella 7b (2026-10-20; da confermare alla revisione della 7b)
+
+- **Schermata** `/galleria3d/:id` (`pages/Tunnel3D.tsx`), aperta da «Galleria 3D» nella
+  preparazione del modello e nel pannello «Modello 3D» della galleria 2D; da lì «Galleria 2D
+  (sezioni)» torna al 2D. Stessa disposizione del 2D: condizioni e viste a sinistra, barra in
+  alto con Re reale e simulato, Mach, **bloccaggio d'area**, griglia, celle sul corpo, τ, passi/s e
+  fps, badge «Similitudine parziale» (tooltip per la scuola, con i due Re) e «Griglia
+  grossolana» (sempre, con il lato della cella). I risultati (pannello di destra) arrivano con la
+  7c. Velocità, fluido, temperatura, pavimento, ingresso, risoluzione, imbardata e beccheggio
+  ripartono da zero; la lunghezza di riferimento no (stesso reticolo, come §9.4). Tipo
+  «veicolo»: bloccaggio d'area al 10%, gli altri all'8%; riferimento «corda» = lunghezza lungo x.
+- **Rotazioni**: cursori di imbardata (±180°) e beccheggio (±90°) e campi numerici; durante il
+  trascinamento il modello ruota a schermo e il flusso è in pausa, al rilascio nuovi voxel, nuovo
+  piano, flusso da zero (riparte da solo se l'utente non l'aveva messo in pausa).
+- **Ordine di un caso**: geometria nel worker (`voxel.worker.ts`: corpo ruotato, ingombro e area
+  frontale) → piano → voxel sulla sua griglia (in cache per rotazione e griglia) → piano con
+  `reference_area_m2` = area frontale dei voxel → solutore. Le pipeline del solutore si compilano
+  una volta per dispositivo.
+- **Campo per la resa**: a ogni fotogramma con passi nuovi le popolazioni diventano una texture
+  3D `rgba16float` (ux, uy, uz, δρ; 8 byte per cella) che tutte le viste campionano con il filtro
+  trilineare dell'hardware. Nelle celle solide δρ è la media delle vicine fluide sulle facce, così
+  la pressione letta alla parete non scende verso zero.
+- **Piano di taglio**: trasversale, longitudinale (predefinito, per il centro del corpo) o
+  orizzontale; velocità (viridis) o Cp (mappa divergente); le celle del corpo sul piano sono grigie
+  (la forma che vede il flusso). Il piano trasversale parte mezza lunghezza dietro il corpo.
+- **Cp sulla superficie**: per frammento, letto 0,75 celle fuori dalla superficie lungo la normale
+  (normali dei vertici pesate per area, dalla mesh di vista).
+- **Fumo**: rastrello di 15 ugelli (2–48) orizzontale o verticale, a metà strada tra ingresso e
+  corpo, largo 1,2 volte il corpo, spostabile e allargabile dal pannello; un punto per ugello a
+  ogni fotogramma con flusso, 384 punti per filamento, trasporto RK2 con il numero di passi del
+  fotogramma, nastri di 2 px che sfumano con l'età. Un punto che finirebbe nel corpo **scivola
+  sulle sue facce** (asse per asse) invece di sparire: senza, il fumo che arriva sul muso si
+  fermava lì.
+- **Particelle**: 50.000 (non 100.000 come nel 2D: in un volume coprivano tutto e il riempimento
+  dimezzava i passi/s), nate a caso nel fluido, vita 120–360 fotogrammi, trattini lunghi 2,5 celle
+  alla velocità del vento e al più 18 px a schermo, colorati per velocità.
+- **Scale dei colori** come nel 2D: 2°–98° percentile, simmetrica per Cp; letta ogni 400 ms da
+  ~6000 celle del piano e ~4000 punti appena fuori dalla superficie. **Durante la rampa
+  d'avvio** la scala è fissa (velocità 0–1,3 V, Cp ±1): automatica inseguiva velocità mille volte
+  più piccole del vento. «Blocca scala» le ferma tutte.
+- **Passi per fotogramma**: si cerca un fotogramma di ~27 ms di GPU (≥ 30 fps con margine), con al
+  più due fotogrammi in attesa sulla GPU (che così non resta mai ferma); misura ogni 8 passi come
+  nel 2D. Con `passi_per_frame` fisso vale quello.
+- **Telecamera** orbitale, z in alto, vista iniziale isometrica sul corpo con la scia; pulsanti
+  Isometrica/Frontale/Laterale/Dall'alto; la vista non tocca la simulazione.
+- **Istantanea** (S) a risoluzione doppia, con legende e condizioni (Re, griglia, passo,
+  similitudine parziale, griglia grossolana); **video** (V) WebM come nel 2D.
+- **Dispositivo perso**: «La GPU ha interrotto la simulazione» e «Riprendi» (nuovo dispositivo,
+  stesso caso). Senza WebGPU: il messaggio di §24.2 #2.
+- **Test**: test 41 (parte 7b) in `frontend/tests/e2e/phase7.e2e.mjs`, test 42 nel test 4 con
+  una sessione 3D, vitest `tunnel3d.test.ts` (telecamera, modello disegnato = voxel, rastrello,
+  punti di campionamento, scale, client del worker). L'e2e e il test 4 usano WebGPU sulla GPU
+  vera (Vulkan), come i benchmark: in Chrome headless un canvas WebGPU su SwiftShader perde
+  l'istanza al primo fotogramma (solo il calcolo funziona, per questo il test 39 resta lì).
+- **Misure** (2026-10-20, Iris Xe, alimentatore, profilo «performance», corpo di Ahmed sul nastro,
+  piano + Cp in superficie + fumo + particelle, finestra 1440×900): Bozza 0,50 M celle 603 passi/s,
+  37 fps; **Normale 1,50 M celle 184 passi/s, 37,6 fps** (P5 37); Fine 3,98 M celle 67 passi/s,
+  34,5 fps. Target di §24.4 (≥ 30 fps a Normale con fumo e particelle) rispettato.

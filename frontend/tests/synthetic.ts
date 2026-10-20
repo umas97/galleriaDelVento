@@ -154,6 +154,58 @@ export function cubeWithSmallHole(hole = true): Mesh {
   return b.mesh()
 }
 
+/**
+ * A simplified Ahmed body (SPEC §18): the 1:1 bluff car of the reference
+ * experiments, 1.044 × 0.389 × 0.288 m, front corners rounded with 0.1 m,
+ * a 25° rear slant 0.222 m long, 0.05 m above the floor; no stilts.
+ */
+export function ahmedBody(arc = 8): Mesh {
+  const [length, width, height, clearance, r, slant] = [1.044, 0.389, 0.288, 0.05, 0.1, 0.222]
+  const z0 = clearance
+  const z1 = clearance + height
+  const a = (25 * Math.PI) / 180
+  // Side profile (x, z), anticlockwise with x to the right and z up.
+  const profile: [number, number][] = [
+    [r, z0],
+    [length, z0],
+    [length, z1 - slant * Math.sin(a)],
+    [length - slant * Math.cos(a), z1],
+    [r, z1],
+  ]
+  for (let k = 1; k < arc; k++) {
+    const t = Math.PI / 2 + (k * Math.PI) / 2 / arc
+    profile.push([r + r * Math.cos(t), z1 - r + r * Math.sin(t)])
+  }
+  profile.push([0, z1 - r], [0, z0 + r])
+  for (let k = 1; k < arc; k++) {
+    const t = Math.PI + (k * Math.PI) / 2 / arc
+    profile.push([r + r * Math.cos(t), z0 + r + r * Math.sin(t)])
+  }
+  const b = new Builder()
+  const [y0, y1] = [-width / 2, width / 2]
+  const n = profile.length
+  for (let i = 0; i < n; i++) {
+    const [xa, za] = profile[i]
+    const [xb, zb] = profile[(i + 1) % n]
+    b.quad(b.vertex(xa, y0, za), b.vertex(xa, y1, za), b.vertex(xb, y1, zb), b.vertex(xb, y0, zb))
+  }
+  const cx = profile.reduce((s, p) => s + p[0], 0) / n
+  const cz = profile.reduce((s, p) => s + p[1], 0) / n
+  for (const [y, outward] of [
+    [y1, 1],
+    [y0, -1],
+  ]) {
+    const c = b.vertex(cx, y, cz)
+    for (let i = 0; i < n; i++) {
+      const [xa, za] = profile[i]
+      const [xb, zb] = profile[(i + 1) % n]
+      if (outward > 0) b.triangle(c, b.vertex(xb, y, zb), b.vertex(xa, y, za))
+      else b.triangle(c, b.vertex(xa, y, za), b.vertex(xb, y, zb))
+    }
+  }
+  return b.mesh()
+}
+
 export function bboxCentre(mesh: Mesh): [number, number, number] {
   const lo = [Infinity, Infinity, Infinity]
   const hi = [-Infinity, -Infinity, -Infinity]

@@ -395,6 +395,9 @@ function ModelBench({ model, preset, settings }: { model: ModelRecord; preset: S
         <Button kind="ghost" onClick={() => setMini(!mini)}>
           {mini ? t('scene.miniHide') : t('scene.miniShow')}
         </Button>
+        <Link to={`/galleria3d/${model.id}`} className="self-center text-sm text-accent hover:underline" title={t('setup.openTunnel3d.tip')}>
+          {t('setup.openTunnel3d')}
+        </Link>
       </div>
       <SaveError error={saver.error} />
       {saved ? (

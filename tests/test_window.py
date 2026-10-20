@@ -151,3 +151,23 @@ def test_4_every_disabled_feature_exists_in_the_installed_chrome():
     data = binary.read_bytes()
     missing = [name for name in CHROME_DISABLED_FEATURES if name.encode() not in data]
     assert missing == [], f"funzioni sconosciute a questo Chrome: {missing}"
+
+
+def test_4_every_redirect_switch_exists_in_the_installed_chrome():
+    """The services no flag turns off are pointed at a dead address by switches that
+    Chrome, again, ignores silently when it does not know them (SPEC §2.2)."""
+    import shutil
+
+    from gdv.window import CHROME_OFFLINE_FLAGS
+
+    found = shutil.which("google-chrome") or shutil.which("google-chrome-stable")
+    if found is None:
+        pytest.skip("Google Chrome non trovato")
+    binary = Path(found).resolve().parent / "chrome"
+    if not binary.is_file():
+        pytest.skip(f"binario di Chrome non trovato accanto a {found}")
+    data = binary.read_bytes()
+    redirects = [f[2:].split("=", 1)[0] for f in CHROME_OFFLINE_FLAGS if "127.0.0.1:9/" in f]
+    assert len(redirects) >= 7
+    missing = [name for name in redirects if name.encode() not in data]
+    assert missing == [], f"switch sconosciuti a questo Chrome: {missing}"

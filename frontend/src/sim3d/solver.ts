@@ -57,7 +57,7 @@ export function rampedSpeed3D(step: number, p: LatticeParams3D): number {
 }
 
 /** Inlet shape per row z, float32: ones, or the boundary-layer power law. */
-export function inletShape3D(p: LatticeParams3D): Float32Array {
+export function inletShape3D(p: LatticeParams3D): Float32Array<ArrayBuffer> {
   const out = new Float32Array(p.nz).fill(1)
   if (p.boundaryLayer)
     for (let z = 0; z < p.nz; z++) out[z] = Math.pow((z + 0.5) / p.inletReferenceCells, p.inletExponent)
@@ -71,7 +71,7 @@ export function smagorinskyFactor(cs: number): number {
 }
 
 /** Voxels (one byte per cell, x fastest) as the solver's bit mask, 32 cells to a word. */
-export function packMask(voxels: Uint8Array): Uint32Array {
+export function packMask(voxels: Uint8Array): Uint32Array<ArrayBuffer> {
   const out = new Uint32Array(Math.ceil(voxels.length / 32) + 1)
   for (let i = 0; i < voxels.length; i++) if (voxels[i]) out[i >>> 5] |= 1 << (i & 31)
   return out
@@ -105,6 +105,53 @@ const GROUND = { none: 0, fixed: 1, moving: 2 } as const
 const BATCH = 64
 const READERS = 4
 
+type Compiled = {
+  pipelines: { step: GPUComputePipeline; measure: GPUComputePipeline; reduce: GPUComputePipeline }
+  layouts: { step: GPUBindGroupLayout; measure: GPUBindGroupLayout; reduce: GPUBindGroupLayout }
+}
+
+/** The kernels, compiled once per device: a new case (a new grid) reuses them. */
+const PIPELINES = new WeakMap<GPUDevice, Promise<Compiled>>()
+
+async function compile(device: GPUDevice): Promise<Compiled> {
+  const storage = (binding: number, readOnly: boolean): GPUBindGroupLayoutEntry => ({
+    binding,
+    visibility: GPUShaderStage.COMPUTE,
+    buffer: { type: readOnly ? 'read-only-storage' : 'storage' },
+  })
+  const params = (dynamic: boolean): GPUBindGroupLayoutEntry => ({
+    binding: 0,
+    visibility: GPUShaderStage.COMPUTE,
+    buffer: { type: 'uniform', hasDynamicOffset: dynamic, minBindingSize: PARAMS_SIZE },
+  })
+  const layouts = {
+    step: device.createBindGroupLayout({
+      label: 'passo',
+      entries: [params(true), storage(1, true), storage(2, false), storage(3, true), storage(4, true)],
+    }),
+    measure: device.createBindGroupLayout({
+      label: 'misura',
+      entries: [params(false), storage(1, true), storage(3, true), storage(5, false)],
+    }),
+    reduce: device.createBindGroupLayout({
+      label: 'riduzione',
+      entries: [params(false), storage(1, true), storage(5, false)],
+    }),
+  }
+  const pipeline = async (label: string, code: string, layout: GPUBindGroupLayout) =>
+    device.createComputePipelineAsync({
+      label,
+      layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }),
+      compute: { module: await shaderModule(device, label, code), entryPoint: 'main' },
+    })
+  const [step, measure, reduce] = await Promise.all([
+    pipeline('passo', stepShader(), layouts.step),
+    pipeline('misura', measureShader(), layouts.measure),
+    pipeline('riduzione', reduceShader(), layouts.reduce),
+  ])
+  return { pipelines: { step, measure, reduce }, layouts }
+}
+
 export class Solver3D {
   /** Steps done since the start. */
   step = 0
@@ -129,7 +176,7 @@ export class Solver3D {
   private constructor(
     gpu: Gpu,
     readonly lattice: LatticeParams3D,
-    voxels: Uint32Array,
+    voxels: Uint32Array<ArrayBuffer>,
     private readonly pipelines: { step: GPUComputePipeline; measure: GPUComputePipeline; reduce: GPUComputePipeline },
     layouts: { step: GPUBindGroupLayout; measure: GPUBindGroupLayout; reduce: GPUBindGroupLayout },
   ) {
@@ -222,44 +269,11 @@ export class Solver3D {
       })
   }
 
-  static async create(gpu: Gpu, lattice: LatticeParams3D, voxels: Uint32Array): Promise<Solver3D> {
-    const device = gpu.device
-    const storage = (binding: number, readOnly: boolean): GPUBindGroupLayoutEntry => ({
-      binding,
-      visibility: GPUShaderStage.COMPUTE,
-      buffer: { type: readOnly ? 'read-only-storage' : 'storage' },
-    })
-    const params = (dynamic: boolean): GPUBindGroupLayoutEntry => ({
-      binding: 0,
-      visibility: GPUShaderStage.COMPUTE,
-      buffer: { type: 'uniform', hasDynamicOffset: dynamic, minBindingSize: PARAMS_SIZE },
-    })
-    const layouts = {
-      step: device.createBindGroupLayout({
-        label: 'passo',
-        entries: [params(true), storage(1, true), storage(2, false), storage(3, true), storage(4, true)],
-      }),
-      measure: device.createBindGroupLayout({
-        label: 'misura',
-        entries: [params(false), storage(1, true), storage(3, true), storage(5, false)],
-      }),
-      reduce: device.createBindGroupLayout({
-        label: 'riduzione',
-        entries: [params(false), storage(1, true), storage(5, false)],
-      }),
-    }
-    const pipeline = async (label: string, code: string, layout: GPUBindGroupLayout) =>
-      device.createComputePipelineAsync({
-        label,
-        layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }),
-        compute: { module: await shaderModule(device, label, code), entryPoint: 'main' },
-      })
-    const [step, measure, reduce] = await Promise.all([
-      pipeline('passo', stepShader(), layouts.step),
-      pipeline('misura', measureShader(), layouts.measure),
-      pipeline('riduzione', reduceShader(), layouts.reduce),
-    ])
-    return new Solver3D(gpu, lattice, voxels, { step, measure, reduce }, layouts)
+  static async create(gpu: Gpu, lattice: LatticeParams3D, voxels: Uint32Array<ArrayBuffer>): Promise<Solver3D> {
+    let compiled = PIPELINES.get(gpu.device)
+    if (!compiled) PIPELINES.set(gpu.device, (compiled = compile(gpu.device)))
+    const { pipelines, layouts } = await compiled
+    return new Solver3D(gpu, lattice, voxels, pipelines, layouts)
   }
 
   private fillParams(view: DataView, u: number, count: number, rowStride: number): void {
@@ -273,6 +287,11 @@ export class Solver3D {
   /** The buffer holding the current state (for the views). */
   get current(): GPUBuffer {
     return this.pops[this.step % 2]
+  }
+
+  /** The body's bit mask (for the views: tracers die in it, the plane shows its cells). */
+  get maskBuffer(): GPUBuffer {
+    return this.mask
   }
 
   /** Advance `steps` time steps. */

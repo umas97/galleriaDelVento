@@ -135,6 +135,14 @@ function Setup({ model, update }: { model: ModelRecord; update: Update }) {
           >
             {t('setup.openTunnel')}
           </Link>
+          <Tip text={t('setup.openTunnel3d.tip')}>
+            <Link
+              to={`/galleria3d/${model.id}`}
+              className="inline-block rounded-md border border-ink-500 px-3 py-1.5 text-sm text-ink-100 hover:bg-ink-700"
+            >
+              {t('setup.openTunnel3d')}
+            </Link>
+          </Tip>
         </div>
       </aside>
 

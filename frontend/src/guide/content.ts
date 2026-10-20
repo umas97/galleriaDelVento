@@ -9,7 +9,8 @@ export const GUIDE_SECTIONS = {
   charts: ['history', 'cp', 'probes', 'polar', 'speed', 'depth', 'hollow'],
   views: ['speed', 'pressure', 'vorticity', 'smoke', 'particles', 'streamlines', 'legend', 'outline', 'floor'],
   status: ['ramp', 'transient', 'provisional', 'converged', 'unstable', 'partial', 'section2d', 'repaired', 'mach'],
-  shortcuts: ['general', 'tunnel', 'view', 'tools', 'model', 'editor'],
+  tunnel3d: ['what', 'camera', 'plane', 'surface', 'smoke', 'particles', 'voxels', 'similarity', 'rotations', 'restart'],
+  shortcuts: ['general', 'tunnel', 'view', 'tools', 'model', 'tunnel3d', 'editor'],
 } as const
 
 export type GuideSection = keyof typeof GUIDE_SECTIONS

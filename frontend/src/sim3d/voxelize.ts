@@ -123,7 +123,7 @@ export type Grid3 = { nx: number; ny: number; nz: number; dx: number; offset: Ve
  * byte per cell, x fastest. `closed`: the mesh is watertight (rays along z
  * only); otherwise the majority of x, y and z.
  */
-export function voxelize(body: Float64Array, indices: Uint32Array, grid: Grid3, closed: boolean): Uint8Array {
+export function voxelize(body: Float64Array, indices: Uint32Array, grid: Grid3, closed: boolean): Uint8Array<ArrayBuffer> {
   const { nx, ny, nz, dx, offset } = grid
   const p = new Float64Array(body.length)
   for (let i = 0; i < body.length; i += 3)

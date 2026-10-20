@@ -8,7 +8,9 @@
 import { t } from '../i18n/it'
 import type {
   CasePlan,
+  CasePlan3D,
   CaseSetup,
+  CaseSetup3D,
   CheckResult,
   Comparison,
   DrawingInfo,
@@ -160,6 +162,8 @@ export const api = {
 
   plan: (setup: CaseSetup, signal?: AbortSignal) =>
     request<CasePlan>('/api/cases/plan', { method: 'POST', body: json(setup), signal }),
+  plan3d: (setup: CaseSetup3D, signal?: AbortSignal) =>
+    request<CasePlan3D>('/api/cases/plan3d', { method: 'POST', body: json(setup), signal }),
 
   importDrawing: (file: File, onProgress?: (f: number) => void) =>
     uploadBytes<DrawingInfo>(`/api/drawings/import?nome=${encodeURIComponent(file.name)}`, file, onProgress),

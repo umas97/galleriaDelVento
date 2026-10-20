@@ -17,6 +17,7 @@ import { ReportPage } from './pages/ReportPage'
 import { SketchWizardPage } from './pages/SketchWizard'
 import { StudyPage } from './pages/StudyPage'
 import { TunnelPage } from './pages/Tunnel'
+import { Tunnel3DPage } from './pages/Tunnel3D'
 import { SettingsPage } from './pages/SettingsPage'
 import { GuideProvider } from './guide/Guide'
 
@@ -33,6 +34,7 @@ export function App() {
             <Route path="/profili/:id" element={<ProfileEditorPage />} />
             <Route path="/schizzi/:id" element={<SketchWizardPage />} />
             <Route path="/galleria/:kind/:id" element={<TunnelPage />} />
+            <Route path="/galleria3d/:id" element={<Tunnel3DPage />} />
             <Route path="/studi/:id" element={<StudyPage />} />
             <Route path="/confronto" element={<ComparePage />} />
             <Route path="/report/:id" element={<ReportPage />} />
