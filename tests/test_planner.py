@@ -174,6 +174,24 @@ def test_chamber_with_floor_keeps_the_real_height():
     assert 1.5 / p.height_m <= 0.08 + 1e-3
 
 
+def test_moving_floor_keeps_a_gap_of_a_few_cells():
+    # A profile below y = 0 sits on the floor at its lowest point: on the belt that
+    # closes a pocket the belt pumps into (unstable), so it is lifted by 3 cells.
+    moving = plan(CaseSetup(profile=naca(), ground="moving"))
+    assert moving.floor_gap_m == pytest.approx(planner.MOVING_FLOOR_GAP_CELLS * moving.dx)
+    lowest = min(y for x, y in naca().loops[0].points)
+    bottom = moving.position[1] - moving.pivot[1] + lowest
+    assert bottom == pytest.approx(moving.floor_gap_m, abs=1e-12)
+    # A fixed floor can be touched.
+    fixed = plan(CaseSetup(profile=naca(), ground="fixed"))
+    assert fixed.floor_gap_m == 0
+    assert fixed.position[1] - fixed.pivot[1] + lowest == pytest.approx(0.0, abs=1e-12)
+    # Plans saved before the field existed still read.
+    data = moving.model_dump()
+    del data["floor_gap_m"]
+    assert type(moving).model_validate(data).floor_gap_m == 0
+
+
 def test_chamber_with_boundary_layer_needs_a_floor():
     with pytest.raises(ValueError, match="pavimento"):
         CaseSetup(profile=box(), inlet_profile="boundary_layer", ground="none")

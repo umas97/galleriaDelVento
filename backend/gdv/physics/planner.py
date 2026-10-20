@@ -100,6 +100,12 @@ CLEARANCE = 3.0  # body heights of free air above (and below)
 #: A chamber at least this many body lengths tall, so that a thin plate at zero
 #: incidence (H → 0) does not get a slit of a chamber. Provisional choice.
 MIN_HEIGHT = 2.0
+#: Smallest gap between a body and a *moving* floor, in cells. A body touching
+#: the belt (or one cell above it) closes a wedge-shaped pocket that the belt
+#: keeps pumping fluid into: a NACA 0012 on the belt went unstable within a
+#: second, at one cell in 14 s; two cells held 40 s (GPU, Bozza, 2026-10-20).
+#: Three, for a margin. A fixed floor can be touched (it holds).
+MOVING_FLOOR_GAP_CELLS = 3
 #: Boundary-layer inlet: power law (SPEC §9.1).
 BL_EXPONENT = 0.16
 BL_REFERENCE_HEIGHT = 10.0  # metres
@@ -222,6 +228,9 @@ class CasePlan(BaseModel):
     #: Ceiling of a series point: ramp + 20 T_c (SPEC §11.3).
     max_steps: int
     ground: Ground
+    #: Least distance between the body and the floor, metres (moving floor: a few cells).
+    #: Default for plans saved before it existed.
+    floor_gap_m: float = 0.0
     inlet_profile: Literal["uniform", "boundary_layer"]
     inlet_exponent: float
     #: Height where the boundary-layer inlet reaches the set speed, in cells.
@@ -440,8 +449,13 @@ def plan(setup: CaseSetup) -> CasePlan:
         width, height, lengths = automatic()
     nx, ny, dx = _grid(width, height, cells)
     width, height = nx * dx, ny * dx
+    floor_gap = MOVING_FLOOR_GAP_CELLS * dx if setup.ground == "moving" else 0.0
     if position is None:
         position = _default_position(box, pivot, height, setup, floor_level, lengths[0])
+        if setup.ground != "none":
+            # At the real height the lowest point is box[1] - floor_level above the floor.
+            lift = max(0.0, floor_gap - (box[1] - floor_level))
+            position = (position[0], position[1] + lift)
 
     u_lat, nu_lat, re_sim = _similarity(setup, fluid.kinematic_viscosity, dx, height)
     inlet_reference_cells = BL_REFERENCE_HEIGHT / dx
@@ -495,6 +509,7 @@ def plan(setup: CaseSetup) -> CasePlan:
         transient_steps=ramp + int(math.ceil(3 * tc_steps)),
         max_steps=ramp + int(math.ceil(20 * tc_steps)),
         ground=setup.ground,
+        floor_gap_m=floor_gap,
         inlet_profile=setup.inlet_profile,
         inlet_exponent=BL_EXPONENT,
         inlet_reference_cells=inlet_reference_cells,

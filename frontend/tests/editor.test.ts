@@ -11,7 +11,10 @@ import {
   deletePoint,
   docFromProfile,
   docToDraft,
+  densifyLoop,
   insertPoint,
+  insertPointAt,
+  simplifyLoop,
   makeEditable,
   movePoint,
   outlines,
@@ -238,5 +241,80 @@ describe('splines and measurements', () => {
     expect(draft.loops[0].points.length).toBeGreaterThan(doc.loops[0].points.length)
     const raw = docFromProfile({ loops: [{ points: naca4() }], spline: null })
     expect(raw.loops[0].kind).toBe('raw')
+  })
+})
+
+describe('adding and removing points without changing tool', () => {
+  const square = (): EditorDoc => ({
+    loops: [{ kind: 'polyline', points: [[0, 0], [1, 0], [1, 1], [0, 1]], corners: [false, false, false, false], symmetricAxisY: null }],
+  })
+
+  it('a point pulled out of the curve is the one the drag then moves', () => {
+    const { doc, k } = insertPointAt(square(), 0, 1, [1, 0.5])
+    expect(k).toBe(2)
+    const moved = movePoint(doc, 0, k, [1.3, 0.5])
+    expect((moved.loops[0] as ShapeLoop).points[2]).toEqual([1.3, 0.5])
+    expect((moved.loops[0] as ShapeLoop).points).toHaveLength(5)
+  })
+
+  it('in symmetric mode, on either half, the index returned is the point inserted', () => {
+    const base = symmetricDoc()
+    const loop = base.loops[0] as ShapeLoop
+    const n = loop.points.length
+    for (const after of [0, n - 2]) {
+      const a = loop.points[after]
+      const b = loop.points[(after + 1) % n]
+      const at: Pt = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
+      const { doc, k } = insertPointAt(base, 0, after, at)
+      const placed = (doc.loops[0] as ShapeLoop).points[k]
+      expect(close(placed, at, 1e-9), `after ${after}: ${placed} vs ${at}`).toBe(true)
+    }
+  })
+
+  it('«Infittisci» doubles the points and keeps a polyline exactly', () => {
+    const doc = densifyLoop(square(), 0)
+    const loop = doc.loops[0] as ShapeLoop
+    expect(loop.points).toHaveLength(8)
+    expect(loop.points[1]).toEqual([0.5, 0])
+    expect(Math.abs(signedArea(loop.points))).toBeCloseTo(1, 12)
+  })
+
+  it('«Infittisci» moves a spline by a hair', () => {
+    const doc: EditorDoc = { loops: [circleLoop(0, 0, 1, 8)] }
+    const before = sampleShape(doc.loops[0] as ShapeLoop).points
+    const after = sampleShape(densifyLoop(doc, 0).loops[0] as ShapeLoop).points
+    expect(hausdorff(before, after)).toBeLessThan(0.01)
+  })
+
+  it('«Semplifica» undoes «Infittisci» on a polyline, and keeps corners', () => {
+    const dense = densifyLoop(square(), 0)
+    const { doc, removed } = simplifyLoop(dense, 0, 1e-9)
+    expect(removed).toBe(4)
+    expect((doc.loops[0] as ShapeLoop).points).toHaveLength(4)
+    const cornered = toggleCorner(dense, 0, 1)
+    expect((simplifyLoop(cornered, 0, 1e-9).doc.loops[0] as ShapeLoop).points).toContainEqual([0.5, 0])
+  })
+
+  it('«Semplifica» stays within its tolerance on a spline', () => {
+    const doc: EditorDoc = { loops: [circleLoop(0, 0, 1, 32)] }
+    const tol = 0.01
+    const { doc: simple, removed } = simplifyLoop(doc, 0, tol)
+    expect(removed).toBeGreaterThan(0)
+    const a = sampleShape(doc.loops[0] as ShapeLoop).points
+    const b = sampleShape(simple.loops[0] as ShapeLoop).points
+    expect(hausdorff(a, b)).toBeLessThan(2 * tol)
+  })
+
+  it('«Semplifica» in symmetric mode keeps the loop symmetric', () => {
+    const dense = densifyLoop(symmetricDoc(), 0)
+    const { doc } = simplifyLoop(dense, 0, 1e-3)
+    const loop = doc.loops[0] as ShapeLoop
+    const axis = loop.symmetricAxisY as number
+    const m = loop.points.length / 2 + 1
+    for (let i = 1; i < m - 1; i++) {
+      const mirror = loop.points[2 * m - 2 - i]
+      expect(mirror[0]).toBeCloseTo(loop.points[i][0], 12)
+      expect(mirror[1]).toBeCloseTo(2 * axis - loop.points[i][1], 12)
+    }
   })
 })

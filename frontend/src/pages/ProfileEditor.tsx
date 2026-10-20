@@ -22,6 +22,9 @@ import {
   docFromProfile,
   docToDraft,
   insertPoint,
+  insertPointAt,
+  densifyLoop,
+  simplifyLoop,
   makeEditable,
   movePoint,
   outlines,
@@ -40,6 +43,7 @@ import { isTextField, metres, num, parseDecimal } from '../lib/format'
 import type { EditorSource, PhotoSource, Profile2D, ProfileSource } from '../lib/types'
 import { boxOf, type Pt } from '../profile/geometry'
 import { DEFAULT_CONTROL_POINTS } from '../profile/fit'
+import { shapeSize as shapeSizeOf } from '../profile/spline'
 import { profileMetrics } from '../profile/metrics'
 import { validateLoops } from '../profile/validate'
 import { t } from '../i18n/it'
@@ -125,6 +129,7 @@ function Editor({ original, readOnly }: { original: Profile2D | null; readOnly: 
   const [naming, setNaming] = useState(false)
   const [leaving, setLeaving] = useState<string | null>(null)
   const [fitInfo, setFitInfo] = useState<string | null>(null)
+  const [simplifyPercent, setSimplifyPercent] = useState(0.2)
   const saver = useProfileSaver()
   const dirty = savedDoc !== doc || (original !== null && name !== original.name)
 
@@ -223,6 +228,11 @@ function Editor({ original, readOnly }: { original: Profile2D | null; readOnly: 
           events={{
             onMove: (li, k, to, first) => commit(movePoint(doc, li, k, to), !first),
             onInsert: (li, after, at) => commit(insertPoint(doc, li, after, at)),
+            onPullOut: (li, after, at) => {
+              const { doc: next, k } = insertPointAt(doc, li, after, at)
+              commit(next)
+              return k
+            },
             onDelete: (li, k) => commit(deletePoint(doc, li, k)),
             onToggleCorner: (li, k) => commit(toggleCorner(doc, li, k)),
             onSelect: setSelected,
@@ -322,17 +332,71 @@ function Editor({ original, readOnly }: { original: Profile2D | null; readOnly: 
                 ) : (
                   <div className="space-y-1 text-xs">
                     <div className="flex items-center gap-2">
-                      <select
-                        className="rounded border border-ink-600 bg-ink-800 px-1 py-0.5"
-                        value={loop.kind}
-                        disabled={!editable}
-                        onChange={(event) => commit(setLoopKind(doc, li, event.target.value as ShapeLoop['kind']))}
-                        aria-label={t('editor.loop', { n: li + 1 })}
-                      >
-                        <option value="spline">{t('editor.loop.spline')}</option>
-                        <option value="polyline">{t('editor.loop.polyline')}</option>
-                      </select>
-                      <span className="text-ink-300">{t('editor.loop.points', { count: loop.points.length })}</span>
+                      <span className="inline-flex overflow-hidden rounded border border-ink-600" role="group" aria-label={t('editor.loop', { n: li + 1 })}>
+                        {(['spline', 'polyline'] as ShapeLoop['kind'][]).map((kind) => (
+                          <button
+                            key={kind}
+                            disabled={!editable}
+                            className={`px-2 py-0.5 ${loop.kind === kind ? 'bg-accent text-ink-950' : 'text-ink-200 hover:bg-ink-700'}`}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              if (loop.kind !== kind) commit(setLoopKind(doc, li, kind))
+                            }}
+                            data-testid={`loop-${li}-${kind}`}
+                          >
+                            {t(`editor.loop.${kind}`)}
+                          </button>
+                        ))}
+                      </span>
+                      <span className="text-ink-300" data-testid={`loop-${li}-count`}>
+                        {t('editor.loop.points', { count: loop.points.length })}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <Tip text={t('editor.densify.tip')}>
+                        <button
+                          className="rounded border border-ink-600 px-2 py-0.5 hover:bg-ink-700 disabled:opacity-40"
+                          disabled={!editable || loop.points.length > 400}
+                          data-testid={`loop-${li}-densify`}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            commit(densifyLoop(doc, li))
+                          }}
+                        >
+                          {t('editor.densify')}
+                        </button>
+                      </Tip>
+                      <Tip text={t('editor.simplify.tip')}>
+                        <button
+                          className="rounded border border-ink-600 px-2 py-0.5 hover:bg-ink-700 disabled:opacity-40"
+                          disabled={!editable}
+                          data-testid={`loop-${li}-simplify`}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            const tolerance = (simplifyPercent / 100) * shapeSizeOf(loop)
+                            const { doc: next, removed } = simplifyLoop(doc, li, tolerance)
+                            if (removed) commit(next)
+                            setFitInfo(t('editor.simplify.done', { count: removed, tolerance: metres(tolerance) }))
+                          }}
+                        >
+                          {t('editor.simplify')}
+                        </button>
+                      </Tip>
+                      <label className="flex items-center gap-1 text-ink-300">
+                        {t('editor.simplify.tolerance')}
+                        <select
+                          className="rounded border border-ink-600 bg-ink-800 px-1 py-0.5"
+                          value={simplifyPercent}
+                          onChange={(event) => setSimplifyPercent(Number(event.target.value))}
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          {[0.05, 0.1, 0.2, 0.5, 1].map((v) => (
+                            <option key={v} value={v}>
+                              {t('editor.simplify.percent', { value: num(v, v < 0.1 ? 2 : 1) })}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                     </div>
                     <label className="flex items-center gap-2">
                       <input

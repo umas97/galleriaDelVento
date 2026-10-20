@@ -368,6 +368,7 @@ export type CasePlan = {
   transient_steps: number
   max_steps: number
   ground: Ground
+  floor_gap_m: number
   inlet_profile: InletProfile
   inlet_exponent: number
   inlet_reference_cells: number

@@ -10,6 +10,7 @@ import { has } from '../src/i18n/it'
 import { DEFAULT_SETTINGS } from '../src/lib/settings'
 import { MAX_ZOOM, clampCentre, viewTransform } from '../src/sim2d/viewport'
 import { remember, rememberedCase } from '../src/tunnel/lastCase'
+import { aboveFloor, bottomOf } from '../src/sim2d/floor'
 import type { CaseState } from '../src/tunnel/TunnelCore'
 
 const cellAt = (t: { originX: number; originY: number; cellsPerPixel: number }, px: number, py: number) => [(px - t.originX) * t.cellsPerPixel, (py - t.originY) * t.cellsPerPixel]
@@ -147,5 +148,21 @@ describe('last case and settings', () => {
 
   it('the depth reference follows the settings', () => {
     expect(rememberedCase({ ...DEFAULT_SETTINGS, riferimento_in_profondita: 'sezione' }).reference_mode).toBe('section')
+  })
+})
+
+describe('floor', () => {
+  it('finds the lowest point of the placed body', () => {
+    expect(bottomOf([[[0, 0.3], [1, 0.2], [1, 0.5]], [[2, 0.25], [3, 0.4], [2, 0.6]]])).toBe(0.2)
+    expect(bottomOf([])).toBeNull()
+  })
+  it('stops the body on the floor, never inside it', () => {
+    // Position y 1.0, lowest point 0.3 above the floor: at most 0.3 lower.
+    expect(aboveFloor(1.0, 0.3, 0.5)).toBeCloseTo(0.7)
+    expect(aboveFloor(1.0, 0.3, 1.2)).toBe(1.2)
+    // Already dipping (a turn): it rises back to touching.
+    expect(aboveFloor(1.0, -0.1, 1.0)).toBeCloseTo(1.1)
+    // The moving floor's gap.
+    expect(aboveFloor(1.0, 0.3, 0.5, 0.05)).toBeCloseTo(0.75)
   })
 })

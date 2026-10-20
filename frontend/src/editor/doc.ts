@@ -17,7 +17,7 @@
 import type { Profile2D, ProfileDraft, ProfileSource, SplineData } from '../lib/types'
 import { boxOf, signedArea, type Pt } from '../profile/geometry'
 import { fitSpline } from '../profile/fit'
-import { sampleShape } from '../profile/spline'
+import { evalSegment, sampleShape } from '../profile/spline'
 
 export type ShapeLoop = {
   kind: 'spline' | 'polyline'
@@ -155,6 +155,102 @@ export function insertPoint(doc: EditorDoc, li: number, after: number, at: Pt): 
       corners.splice(position, 0, false)
     }),
   )
+}
+
+/**
+ * insertPoint, and the index the new point has in the loop: the one to keep
+ * dragging when a click on the curve pulls a point out of it.
+ */
+export function insertPointAt(doc: EditorDoc, li: number, after: number, at: Pt): { doc: EditorDoc; k: number } {
+  const loop = shapeAt(doc, li)
+  const next = insertPoint(doc, li, after, at)
+  if (loop.symmetricAxisY === null) return { doc: next, k: after + 1 }
+  const m = halfSize(loop)
+  if (after < m - 1) return { doc: next, k: after + 1 }
+  // On the lower half the point is the mirror of a new upper one at 2m − 2 − after.
+  const position = 2 * m - 2 - after
+  return { doc: next, k: 2 * (m + 1) - 2 - position }
+}
+
+/**
+ * Twice the control points, the shape kept: a new point at the middle of
+ * every segment, on the curve (a polyline's segments stay straight; a spline
+ * through more points of itself moves by a hair). In symmetric mode the upper
+ * half is doubled and the lower one follows.
+ */
+export function densifyLoop(doc: EditorDoc, li: number): EditorDoc {
+  const loop = shapeAt(doc, li)
+  const n = loop.points.length
+  const mid = (i: number): Pt => evalSegment(loop, i, 0.5)
+  if (loop.symmetricAxisY === null) {
+    const points: Pt[] = []
+    const corners: boolean[] = []
+    for (let i = 0; i < n; i++) {
+      points.push(loop.points[i], mid(i))
+      corners.push(loop.corners[i], false)
+    }
+    return replaceLoop(doc, li, { ...loop, points, corners })
+  }
+  const m = halfSize(loop)
+  const middles = Array.from({ length: m - 1 }, (_, i) => mid(i))
+  return replaceLoop(
+    doc,
+    li,
+    withUpper(loop, (upper, corners) => {
+      for (let i = m - 2; i >= 0; i--) {
+        upper.splice(i + 1, 0, middles[i])
+        corners.splice(i + 1, 0, false)
+      }
+    }),
+  )
+}
+
+/** Distance from `p` to the closed polyline `ring`. */
+function distanceToRing(p: Pt, ring: Pt[]): number {
+  let best = Infinity
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i]
+    const b = ring[(i + 1) % ring.length]
+    const dx = b[0] - a[0]
+    const dy = b[1] - a[1]
+    const len2 = dx * dx + dy * dy
+    const f = len2 > 0 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2)) : 0
+    best = Math.min(best, Math.hypot(p[0] - a[0] - f * dx, p[1] - a[1] - f * dy))
+  }
+  return best
+}
+
+/**
+ * Fewer control points within `tolerance` (metres): the point whose removal
+ * moves the curve least goes, again and again, while that stays under the
+ * tolerance. Corners and the two ends of a symmetric loop stay. The curve is
+ * measured where it changes: the old samples of the two segments around the
+ * point, against the new curve.
+ */
+export function simplifyLoop(doc: EditorDoc, li: number, tolerance: number): { doc: EditorDoc; removed: number } {
+  let current = doc
+  let removed = 0
+  for (;;) {
+    const loop = shapeAt(current, li)
+    const before = sampleShape(loop)
+    const half = loop.symmetricAxisY === null ? loop.points.length : halfSize(loop)
+    let best: { k: number; error: number; doc: EditorDoc } | null = null
+    for (let k = 0; k < half; k++) {
+      if (loop.corners[k] || !canDeletePoint(current, li, k)) continue
+      const next = deletePoint(current, li, k)
+      const ring = sampleShape(shapeAt(next, li)).points
+      const n = loop.points.length
+      const near = new Set([(k - 1 + n) % n, k])
+      let error = 0
+      before.points.forEach((p, i) => {
+        if (near.has(before.segment[i])) error = Math.max(error, distanceToRing(p, ring))
+      })
+      if (error <= tolerance && (!best || error < best.error)) best = { k, error, doc: next }
+    }
+    if (!best) return { doc: current, removed }
+    current = best.doc
+    removed += loop.symmetricAxisY === null ? 1 : 2
+  }
 }
 
 export function canDeletePoint(doc: EditorDoc, li: number, k: number): boolean {

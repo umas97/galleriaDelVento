@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // The drawing area of the profile editor (SPEC §7.5): metres, y up. Wheel to
-// zoom about the cursor, drag the background to pan. With the move tool the
-// control points are dragged (one undo step per drag); «add» puts a point on
-// the curve where it is clicked; «delete» removes the point clicked; a double
-// click on a point turns its corner on or off; the ruler measures between two
-// clicks. Raw (imported) loops are drawn but not editable.
+// zoom about the cursor, drag the background to pan. With the move tool
+// everything is at hand without changing tool: drag a point to move it (one
+// undo step per drag); press on the curve to pull a new point out of it and
+// drag it (a «+» shows where it would be born); right-click a point, or Canc on
+// the selected one, to remove it; double-click a point for a corner. «add» and
+// «delete» do only that; the ruler measures between two clicks. Raw
+// (imported) loops are drawn but not editable.
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { niceStep, pathOf } from '../components/ProfileView'
 import { metres } from '../lib/format'
@@ -21,6 +23,8 @@ export type CanvasEvents = {
   /** A drag of point k of loop li: `first` is true for the first move of the drag. */
   onMove: (li: number, k: number, to: Pt, first: boolean) => void
   onInsert: (li: number, after: number, at: Pt) => void
+  /** Insert a point and return its index, to drag it on (the drag amends the same undo step). */
+  onPullOut: (li: number, after: number, at: Pt) => number | null
   onDelete: (li: number, k: number) => void
   onToggleCorner: (li: number, k: number) => void
   onSelect: (li: number | null) => void
@@ -59,6 +63,9 @@ export function EditorCanvas({
   const [size, setSize] = useState({ w: 800, h: 600 })
   const [view, setView] = useState<View>({ cx: 0.5, cy: 0, scale: 500 })
   const [ruler, setRuler] = useState<Pt[]>([])
+  /** The point last clicked (Canc removes it) and what is under the pointer. */
+  const [picked, setPicked] = useState<{ li: number; k: number } | null>(null)
+  const [hover, setHover] = useState<{ kind: 'point' } | { kind: 'curve'; at: Pt } | null>(null)
   const drag = useRef<{ kind: 'point'; li: number; k: number; moved: boolean } | { kind: 'pan'; x: number; y: number; view: View } | null>(null)
   const sampled = useMemo(
     () => doc.loops.map((loop) => (loop.kind === 'raw' ? { points: loop.points, segment: [] as number[] } : sampleShape(loop))),
@@ -123,8 +130,8 @@ export function EditorCanvas({
     return best
   }
 
-  const hitCurve = (sx: number, sy: number): { li: number; after: number } | null => {
-    let best: { li: number; after: number; d: number } | null = null
+  const hitCurve = (sx: number, sy: number): { li: number; after: number; at: Pt } | null => {
+    let best: { li: number; after: number; d: number; at: Pt } | null = null
     sampled.forEach((s, li) => {
       if (doc.loops[li].kind === 'raw') return
       const n = s.points.length
@@ -136,15 +143,24 @@ export function EditorCanvas({
         const len2 = dx * dx + dy * dy
         const f = len2 > 0 ? Math.max(0, Math.min(1, ((sx - a[0]) * dx + (sy - a[1]) * dy) / len2)) : 0
         const d = Math.hypot(sx - a[0] - f * dx, sy - a[1] - f * dy)
-        if (d <= HIT_PX && (!best || d < best.d)) best = { li, after: s.segment[i], d }
+        if (d <= HIT_PX && (!best || d < best.d)) best = { li, after: s.segment[i], d, at: [a[0] + f * dx, a[1] + f * dy] }
       }
     })
     return best
   }
 
   const onPointerDown = (event: ReactPointerEvent) => {
-    if (event.button === 1 || event.button === 2) return
+    if (event.button === 1) return
     const [sx, sy] = local(event)
+    if (event.button === 2) {
+      // Right click: remove the point under the pointer (not with the ruler).
+      const point = readOnly || tool === 'ruler' ? null : hitPoint(sx, sy)
+      if (point) {
+        events.onDelete(point.li, point.k)
+        setPicked(null)
+      }
+      return
+    }
     const world = toWorld(sx, sy)
     ;(event.target as Element).setPointerCapture?.(event.pointerId)
     if (tool === 'ruler') {
@@ -155,24 +171,50 @@ export function EditorCanvas({
     const point = readOnly ? null : hitPoint(sx, sy)
     if (point) {
       events.onSelect(point.li)
-      if (tool === 'delete') events.onDelete(point.li, point.k)
-      else if (tool === 'move') drag.current = { kind: 'point', li: point.li, k: point.k, moved: false }
+      if (tool === 'delete') {
+        events.onDelete(point.li, point.k)
+        setPicked(null)
+      } else if (tool === 'move') {
+        drag.current = { kind: 'point', li: point.li, k: point.k, moved: false }
+        setPicked(point)
+      }
       return
     }
     const curve = readOnly ? null : hitCurve(sx, sy)
     if (curve) {
       events.onSelect(curve.li)
-      if (tool === 'add') events.onInsert(curve.li, curve.after, snapTo(world, snap ? gridStep : null))
+      const at = snapTo(world, snap ? gridStep : null)
+      if (tool === 'add') events.onInsert(curve.li, curve.after, at)
+      else if (tool === 'move') {
+        const k = events.onPullOut(curve.li, curve.after, at)
+        // Already one undo step: the drag that follows amends it.
+        if (k !== null) {
+          drag.current = { kind: 'point', li: curve.li, k, moved: true }
+          setPicked({ li: curve.li, k })
+        }
+      }
       return
     }
     events.onSelect(null)
+    setPicked(null)
     drag.current = { kind: 'pan', x: sx, y: sy, view }
   }
 
   const onPointerMove = (event: ReactPointerEvent) => {
     const d = drag.current
-    if (!d) return
     const [sx, sy] = local(event)
+    if (!d) {
+      if (readOnly || tool === 'ruler') {
+        if (hover) setHover(null)
+        return
+      }
+      if (hitPoint(sx, sy)) setHover({ kind: 'point' })
+      else {
+        const curve = tool === 'move' || tool === 'add' ? hitCurve(sx, sy) : null
+        setHover(curve ? { kind: 'curve', at: curve.at } : null)
+      }
+      return
+    }
     if (d.kind === 'pan') {
       setView({ ...d.view, cx: d.view.cx - (sx - d.x) / d.view.scale, cy: d.view.cy + (sy - d.y) / d.view.scale })
       return
@@ -184,6 +226,21 @@ export function EditorCanvas({
   const onPointerUp = () => {
     drag.current = null
   }
+
+  // Canc / Backspace removes the point last clicked; Esc lets it go.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (!picked || readOnly || (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT'))) return
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        event.preventDefault()
+        events.onDelete(picked.li, picked.k)
+        setPicked(null)
+      } else if (event.key === 'Escape') setPicked(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [picked, readOnly, events])
 
   const onDoubleClick = (event: React.MouseEvent) => {
     if (readOnly) return
@@ -209,7 +266,8 @@ export function EditorCanvas({
   }
   const [ox, oy] = toScreen([0, 0])
   const screenLoops = sampled.map((s) => s.points.map(toScreen))
-  const cursor = tool === 'move' ? 'default' : tool === 'ruler' ? 'crosshair' : 'copy'
+  const cursor =
+    tool === 'ruler' ? 'crosshair' : hover?.kind === 'point' ? (tool === 'delete' ? 'not-allowed' : 'grab') : hover?.kind === 'curve' ? 'copy' : tool === 'move' ? 'default' : 'copy'
 
   return (
     <div
@@ -220,6 +278,7 @@ export function EditorCanvas({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
+      onPointerLeave={() => setHover(null)}
       onDoubleClick={onDoubleClick}
       onContextMenu={(event) => event.preventDefault()}
       data-testid="editor-canvas"
@@ -257,6 +316,23 @@ export function EditorCanvas({
             </g>
           )
         })}
+        {picked && doc.loops[picked.li]?.kind !== 'raw' && doc.loops[picked.li]?.points[picked.k] ? (
+          <circle
+            cx={toScreen(doc.loops[picked.li].points[picked.k])[0]}
+            cy={toScreen(doc.loops[picked.li].points[picked.k])[1]}
+            r={9}
+            fill="none"
+            stroke="#f5c26b"
+            strokeWidth={2}
+            data-testid="picked-point"
+          />
+        ) : null}
+        {hover?.kind === 'curve' && !drag.current ? (
+          <g pointerEvents="none" data-testid="ghost-point">
+            <circle cx={hover.at[0]} cy={hover.at[1]} r={6} fill="#7aa2f7" fillOpacity={0.35} stroke="#7aa2f7" strokeWidth={1.5} />
+            <path d={`M${hover.at[0] - 3.5} ${hover.at[1]}H${hover.at[0] + 3.5}M${hover.at[0]} ${hover.at[1] - 3.5}V${hover.at[1] + 3.5}`} stroke="#7aa2f7" strokeWidth={1.5} />
+          </g>
+        ) : null}
         {ruler.length ? (
           <g>
             {ruler.map((p, i) => {

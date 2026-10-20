@@ -22,6 +22,7 @@ import { api } from '../lib/api'
 import { setUnsaved } from '../lib/busy'
 import { useSetSetting, useSettings } from '../lib/settings'
 import { remember } from './lastCase'
+import { aboveFloor } from '../sim2d/floor'
 import { token, useTheme } from '../lib/theme'
 import { isTextField, metres, num } from '../lib/format'
 import type { CasePlan, CaseSetup, Fluid, Ground, InletProfile, ProfileDraft, ReferenceKind, Resolution, SeriesParameter } from '../lib/types'
@@ -343,6 +344,25 @@ export function TunnelCore({
     if (body.loops) engine.current?.setBody({ loops: body.loops, rule: body.rule })
   }, [body.loops, body.rule])
 
+  /** Move the body to `wanted` (chamber metres) at `angle`: inside the chamber, never into the floor. */
+  const placeBody = useCallback((wanted: Pt, angle: number): Pt | null => {
+    const e = engine.current
+    const p = planRef.current
+    const current = position.current
+    if (!e || !p || !current) return null
+    const x = Math.min(p.width_m, Math.max(0, wanted[0]))
+    let y = Math.min(p.height_m, Math.max(0, wanted[1]))
+    if (p.ground !== 'none') {
+      e.setPlacement(current, angle)
+      const bottom = e.bodyBottom()
+      if (bottom !== null) y = Math.min(p.height_m, aboveFloor(current[1], bottom, y, p.floor_gap_m))
+    }
+    const next: Pt = [x, y]
+    position.current = next
+    e.setPlacement(next, angle)
+    return next
+  }, [])
+
   const angleTimer = useRef(0)
   const setAngle = useCallback(
     (angle: number, settle = true) => {
@@ -350,14 +370,25 @@ export function TunnelCore({
       setState((s) => ({ ...s, angle_deg: a }))
       latest.current.state = { ...latest.current.state, angle_deg: a }
       if (position.current) {
-        engine.current?.setPlacement(position.current, a)
-        onPlacement?.(position.current, a)
+        // A turn about the pivot may dip the body into the floor: it rises instead.
+        const placed = placeBody(position.current, a) ?? position.current
+        engine.current?.setPlacement(placed, a)
+        onPlacement?.(placed, a)
       }
       window.clearTimeout(angleTimer.current)
       if (settle) angleTimer.current = window.setTimeout(() => void requestPlan(true), 300)
     },
-    [requestPlan, onPlacement],
+    [requestPlan, onPlacement, placeBody],
   )
+
+  /** The gap between the body's lowest point and the floor, as typed (SPEC §7.2: «quota rispetto al pavimento»). */
+  const setClearance = (value: number) => {
+    const e = engine.current
+    const bottom = e?.bodyBottom()
+    if (!e || bottom === null || bottom === undefined || !position.current) return
+    const placed = placeBody([position.current[0], position.current[1] + (value - bottom)], latest.current.state.angle_deg)
+    if (placed) onPlacement?.(placed, latest.current.state.angle_deg)
+  }
 
   useEffect(() => engine.current?.setOptions(view), [view])
   useEffect(() => engine.current?.setProbes(probes), [probes, plan])
@@ -370,10 +401,12 @@ export function TunnelCore({
     | { kind: 'probe'; index: number }
     | { kind: 'rake'; start: Pt }
     | { kind: 'pan'; x: number; y: number }
+    | { kind: 'floor'; startY: number; origin: Pt }
     | null
   >(null)
   const [zoom, setZoom] = useState(1)
   const [panning, setPanning] = useState(false)
+  const [overFloor, setOverFloor] = useState(false)
   const syncZoom = () => setZoom(engine.current?.zoomLevel ?? 1)
 
   const probeAt = (cell: Pt): number => {
@@ -407,6 +440,7 @@ export function TunnelCore({
     if (tool === 'move') {
       if (event.shiftKey) drag.current = { kind: 'rotate', startY: event.clientY, angle: latest.current.state.angle_deg }
       else if (e.hitsBody(cell) && position.current) drag.current = { kind: 'body', start: cell, origin: position.current }
+      else if (e.nearFloor(event.clientX, event.clientY) && position.current) drag.current = { kind: 'floor', startY: cell[1], origin: position.current }
       else pan()
     } else if (tool === 'probe') {
       const hit = probeAt(cell)
@@ -424,7 +458,17 @@ export function TunnelCore({
     const e = engine.current
     const p = planRef.current
     const d = drag.current
-    if (!e || !p || !d) return
+    if (!e || !p) return
+    if (!d) {
+      const near = tool === 'move' && !lockedRef.current && e.nearFloor(event.clientX, event.clientY)
+      if (near !== overFloor) setOverFloor(near)
+      return
+    }
+    if (d.kind === 'floor') {
+      // Raising the floor brings it closer to the body: the body goes down by as much.
+      placeBody([d.origin[0], d.origin[1] - (e.toCells(event.clientX, event.clientY)[1] - d.startY) * p.dx], latest.current.state.angle_deg)
+      return
+    }
     if (d.kind === 'pan') {
       e.panBy(event.clientX - d.x, event.clientY - d.y)
       drag.current = { kind: 'pan', x: event.clientX, y: event.clientY }
@@ -432,12 +476,7 @@ export function TunnelCore({
     }
     const cell = e.toCells(event.clientX, event.clientY)
     if (d.kind === 'body') {
-      const next: Pt = [
-        Math.min(p.width_m, Math.max(0, d.origin[0] + (cell[0] - d.start[0]) * p.dx)),
-        Math.min(p.height_m, Math.max(0, d.origin[1] + (cell[1] - d.start[1]) * p.dx)),
-      ]
-      position.current = next
-      e.setPlacement(next, latest.current.state.angle_deg)
+      placeBody([d.origin[0] + (cell[0] - d.start[0]) * p.dx, d.origin[1] + (cell[1] - d.start[1]) * p.dx], latest.current.state.angle_deg)
     } else if (d.kind === 'rotate') {
       setAngle(d.angle + (d.startY - event.clientY) * 0.25, false)
     } else if (d.kind === 'probe') {
@@ -455,7 +494,7 @@ export function TunnelCore({
     drag.current = null
     setPanning(false)
     if (d?.kind === 'rotate') void requestPlan(true)
-    if (d?.kind === 'body' && position.current) onPlacement?.(position.current, latest.current.state.angle_deg)
+    if ((d?.kind === 'body' || d?.kind === 'floor') && position.current) onPlacement?.(position.current, latest.current.state.angle_deg)
   }
 
   const onContextMenu = (event: React.MouseEvent<HTMLCanvasElement>) => {
@@ -980,7 +1019,7 @@ export function TunnelCore({
               onPointerUp={() => void requestPlan(true)}
               onKeyUp={() => void requestPlan(true)}
             />
-            <Row label={t('tunnel.ground')}>
+            <Row label={t('tunnel.ground')} tip={t('tunnel.ground.tip')}>
               <Select<Ground>
                 value={state.ground}
                 label={t('tunnel.ground')}
@@ -988,6 +1027,26 @@ export function TunnelCore({
                 onChange={(g) => setState((s) => ({ ...s, ground: g, inlet_profile: g === 'none' ? 'uniform' : s.inlet_profile }))}
               />
             </Row>
+            {state.ground !== 'none' && plan ? (
+              <div className="space-y-1" data-testid="clearance-row">
+                <Row label={t('tunnel.clearance')} tip={t('tunnel.clearance.tip')}>
+                  <NumberField
+                    value={Math.max(plan.floor_gap_m, engine.current?.bodyBottom() ?? 0)}
+                    min={plan.floor_gap_m}
+                    max={plan.height_m}
+                    digits={3}
+                    label={t('tunnel.clearance')}
+                    testId="clearance"
+                    onCommit={setClearance}
+                  />
+                </Row>
+                <div className="flex justify-end">
+                  <button className="text-xs text-accent hover:underline" onClick={() => setClearance(plan.floor_gap_m)} data-testid="clearance-touch">
+                    {t('tunnel.clearance.touch')}
+                  </button>
+                </div>
+              </div>
+            ) : null}
             <Row label={t('tunnel.inlet')} tip={t('tunnel.inlet.bl.tip')}>
               <Select<InletProfile>
                 value={state.ground === 'none' ? 'uniform' : state.inlet_profile}
@@ -1128,7 +1187,7 @@ export function TunnelCore({
           <canvas
             key={`ov-${engineKey}`}
             ref={overlayRef}
-            className={`absolute inset-0 h-full w-full ${panning ? 'cursor-grabbing' : tool === 'move' || locked ? 'cursor-grab' : 'cursor-crosshair'}`}
+            className={`absolute inset-0 h-full w-full ${panning ? 'cursor-grabbing' : overFloor ? 'cursor-ns-resize' : tool === 'move' || locked ? 'cursor-grab' : 'cursor-crosshair'}`}
             data-testid="tunnel-overlay"
             onDoubleClick={(event) => {
               const e = engine.current

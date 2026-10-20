@@ -22,6 +22,7 @@ import { Solver, latticeParams, type LatticeParams, type Sample } from './solver
 import { defaultSeeds, type Field } from './streamlines'
 import { FlowView, hex3, type FieldMode, type Transform } from './views'
 import { MAX_ZOOM, clampCentre, viewTransform } from './viewport'
+import { bottomOf } from './floor'
 
 export { MAX_ZOOM, clampCentre, viewTransform }
 
@@ -363,6 +364,19 @@ export class TunnelEngine {
   /** The cell at the middle of the canvas. */
   private viewCentre(t: Transform): Pt {
     return [(this.canvas.width / 2 - t.originX) * t.cellsPerPixel, (this.canvas.height / 2 - t.originY) * t.cellsPerPixel]
+  }
+
+  /** The body's lowest point above the floor (chamber y, metres), or null without a body. */
+  bodyBottom(): number | null {
+    return bottomOf(place(this.outer, this.placement))
+  }
+
+  /** Whether a pointer (client pixels) is on the floor line, give or take a few pixels. */
+  nearFloor(clientX: number, clientY: number): boolean {
+    if (!this.plan || this.plan.ground === 'none') return false
+    const [x, y] = this.toCells(clientX, clientY)
+    const reach = 7 * this.cellsPerCssPixel()
+    return x >= 0 && x <= (this.params?.nx ?? 0) && Math.abs(y) <= reach
   }
 
   /** Whether a chamber point (cells) is on the body. */
@@ -791,6 +805,36 @@ export class TunnelEngine {
           else ctx.lineTo(x, y)
         }
       }
+      ctx.stroke()
+    }
+    // The floor (SPEC §9.3): hatched when fixed; when moving, stripes that run
+    // downstream at the wind's speed on screen -- the belt of a rolling road.
+    if (this.plan.ground !== 'none') {
+      const [x0, y0] = px(0, 0)
+      const [x1] = px(this.params!.nx, 0)
+      const band = 7 * dpr
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(x0, y0, x1 - x0, band)
+      ctx.clip()
+      ctx.fillStyle = 'rgba(120,120,128,0.55)'
+      ctx.fillRect(x0, y0, x1 - x0, band)
+      ctx.strokeStyle = 'rgba(245,245,245,0.75)'
+      ctx.lineWidth = 1.5 * dpr
+      const step = 12 * dpr
+      const shift = this.plan.ground === 'moving' && this.running ? ((performance.now() / 1000) * 40 * dpr) % step : 0
+      ctx.beginPath()
+      for (let x = x0 - step + shift; x < x1 + step; x += step) {
+        ctx.moveTo(x, y0 + band)
+        ctx.lineTo(x + band, y0)
+      }
+      ctx.stroke()
+      ctx.restore()
+      ctx.strokeStyle = 'rgba(245,245,245,0.9)'
+      ctx.lineWidth = 2 * dpr
+      ctx.beginPath()
+      ctx.moveTo(x0, y0)
+      ctx.lineTo(x1, y0)
       ctx.stroke()
     }
     // The outline: red where it leaves the chamber, else by Cp or light.

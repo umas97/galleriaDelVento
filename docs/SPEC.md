@@ -121,7 +121,8 @@ soggetti**: il backend Python, il JavaScript della pagina e **il processo Chrome
   che a ogni avvio apriva una barra in cima alla finestra («Stai utilizzando una segnalazione
   della riga di comando non supportata…»): la lista porta anche `--test-type`, che Chrome
   controlla prima di mostrarla (lo passa anche chromedriver). Non è un flag di rete; sta nella
-  stessa lista perché il test 4 lo usi e dimostri che non aggiunge traffico (2026-10-20).
+  stessa lista perché il test 4 lo usi e dimostri che non aggiunge traffico (decisione
+  dell'utente, 2026-10-20).
 - **Test 4**: l'avvio e una sessione 2D completa devono registrare zero tentativi non-loopback,
   sia dal backend (socket intercettati) sia da Chrome (lanciato con la stessa lista di flag più
   `--proxy-server` verso un proxy di registrazione su loopback e `--proxy-bypass-list=<-loopback>`;
@@ -534,6 +535,12 @@ worker si verifica con vitest su casi analitici (test 8).
 - **«Rendi modificabile»**: un profilo importato (sezione, foto, SVG, DXF) diventa spline
   adattando N punti di controllo ai minimi quadrati (N scelto dall'utente, default 24 per
   anello; errore massimo mostrato in mm).
+- **Senza cambiare strumento** (richiesta dell'utente, 2026-10-20): con «Sposta» si trascina un
+  punto; premendo sulla curva (dove compare un «+») se ne tira fuori uno nuovo e lo si trascina,
+  in un solo passo di annulla; clic destro o Canc toglie un punto; doppio clic fa lo spigolo.
+  Per ogni anello: «Spline | Polilinea», «Infittisci» (un punto a metà di ogni tratto) e
+  «Semplifica» (toglie i punti finché la curva si sposta meno della tolleranza, 0,05–1% della
+  dimensione; gli spigoli restano).
 - **Annulla/Ripeti** almeno 100 passi (Ctrl+Z / Ctrl+Shift+Z), anche in modalità simmetrica.
 - Il profilo modificato si salva come **nuovo** profilo di default («Salva come…»);
   sovrascrivere richiede «Salva» esplicito. Il profilo di origine è registrato in `source`.
@@ -691,7 +698,13 @@ dimezzerebbe la risoluzione sui corpi allungati. Regola:
 - **Pareti superiore e inferiore**: scorrimento libero (riflessione speculare), così la camera
   approssima il flusso indisturbato.
 - **Pavimento**: `fixed` = rimbalzo no-slip; `moving` = rimbalzo con parete in moto alla
-  velocità del vento (nastro trasportatore); `none` = scorrimento libero.
+  velocità del vento (nastro trasportatore); `none` = scorrimento libero. Sul pavimento mobile il
+  corpo resta ad almeno **3 celle** dal nastro (`floor_gap_m` del piano): a contatto, o a una
+  cella, la sacca a cuneo tra corpo e nastro diventa instabile (NACA 0012 su Bozza: subito a
+  contatto, dopo 14 s a una cella; stabile a due). Il pavimento fisso si può toccare
+  (2026-10-20, da confermare alla revisione). Nella galleria la distanza dal pavimento si scrive
+  («Distanza dal pavimento», «Appoggia al pavimento»), oppure si trascina il corpo o la linea
+  del pavimento; il corpo non entra mai nel pavimento (richiesta dell'utente, 2026-10-20).
 - **Oggetto**: rimbalzo a metà via (*halfway bounce-back*) sulla maschera di celle solide. Le
   condizioni interpolate (Bouzidi) sono un miglioramento possibile solo se la validazione lo
   richiede, da chiedere prima (§22).
@@ -1334,8 +1347,8 @@ licenza prima di aggiungerla.
 - **Simulazione 3D di modelli completi** (richiesta dell'utente, 2026-10-20): una galleria che
   simuli il modello 3D intero, non solo le sue sezioni. Oggi è un non-obiettivo (§1, §4
   decisione 1): l'utente la vuole **come ultima cosa, solo a programma 2D finito e funzionante**.
-  Va progettata a parte (solutore, risoluzione, visualizzazione, forze, validazione) e scritta
-  qui prima di iniziare; nel frattempo i non-obiettivi restano validi.
+  Le risposte dell'utente alle domande di progetto sono in §24 (bozza della Fase 7, da
+  approvare); nel frattempo i non-obiettivi restano validi.
 - **Incidenza oltre ±90°** (direzione del vento su 360° per gli edifici in pianta): in v1 resta
   ±90° (decisione dell'utente, 2026-10-15); le altre direzioni si ottengono ruotando il modello.
 
@@ -1347,3 +1360,88 @@ licenza prima di aggiungerla.
 2. Se lo scaffold manca, esegui la Fase 0 (§19) e collaudala; poi implementa la Fase 1,
    partendo da `safety.py` e dal modello della libreria, con i loro test.
 3. Le fixture sono tutte sintetiche e generate dai test: non chiedere file all'utente.
+
+---
+
+## 24. Fase 7 — Galleria 3D (BOZZA da approvare, 2026-10-20)
+
+> Stato: **bozza**. Raccoglie le risposte dell'utente del 2026-10-20; finché l'utente non la
+> approva valgono i non-obiettivi di §1 e la decisione 1 di §4, e non si scrive codice della
+> Fase 7. Con l'approvazione, §1 e §4 si aggiornano di conseguenza («simulazioni 2D, più la
+> galleria 3D di §24»).
+
+### 24.1 Obiettivo
+
+Una **galleria 3D in tempo reale** (≥ 30 fps) in cui vedere, a **livello di liceo STEM**,
+l'andamento del flusso attorno a un modello 3D intero: semplice, ma non troppo approssimata. Non
+sostituisce la galleria 2D, che resta com'è (sezioni, profili, studi, serie). Valgono gli
+invarianti di §2 (file dell'utente intatti, nessuna rete, nessun numero senza contesto).
+
+### 24.2 Decisioni dell'utente (2026-10-20)
+
+1. **Fisica**: Lattice Boltzmann **D3Q19** su una griglia grossolana (scia, distacco e vortici
+   veri, a Re simulato basso), non flusso potenziale (niente scia: troppo approssimato).
+2. **API**: **WebGPU** per la galleria 3D (compute shader e storage buffer); la 2D resta su
+   WebGL2. Verificato su Chrome 155 con Iris Xe (adattatore `gen-12lp`, storage buffer fino a
+   4 GB, `shader-f16`). Senza WebGPU: «La galleria 3D richiede WebGPU, che questo browser non
+   offre» e tutto il resto funziona (come §3 per WebGL2).
+3. **Viste**: linee di fumo da un rastrello spostabile; particelle; piano di taglio mobile
+   colorato per velocità o Cp; pressione (Cp) sulla superficie del modello.
+4. **Interazione dal vivo**: camera libera (orbita, zoom, spostamento) in ogni momento.
+   Velocità, fluido e pavimento (nessuno / fisso / mobile) si cambiano e ripartono da zero, come
+   nel 2D. **Rotazioni del modello (imbardata, incidenza) prima di avviare**: cambiarle ricomincia
+   il flusso.
+5. **Numeri**: Cd e Cl del corpo intero (su area frontale) e **forze reali in N**, con i badge di
+   contesto (similitudine parziale, griglia grossolana, convergenza; §2.3).
+6. **Risoluzione**: preset come nel 2D (Bozza / Normale / Fine), misurati e regolati sull'Iris Xe.
+7. **Salvataggi**: istantanea PNG e video WebM; **studi 3D** (elenco Studi, confronto tra studi
+   3D); export **VTK** del campo medio 3D (`.vti`); **report PDF**.
+
+### 24.3 Proposte tecniche (da confermare)
+
+- **Solutore**: D3Q19, collisione MRT (d'Humières 2002) con Smagorinsky come nel 2D, float32,
+  popolazioni come deviazione dal peso, passo fuso stream + collide in schema pull, due buffer
+  (ping-pong) in storage buffer. Costanti in `gdv/lattice3d.py`, generate in TypeScript come in
+  §10.2. Contorni come §9.3 estesi al 3D: ingresso a velocità imposta con rampa, uscita a
+  gradiente nullo con spugna e strato assorbente, pareti laterali e soffitto a scorrimento
+  libero, pavimento secondo il tipo, corpo con rimbalzo a metà via sui voxel.
+- **Pianificatore 3D** nel backend (`physics/planner3d.py`, decisione 4 di §4): `CaseSetup3D` →
+  `CasePlan3D` con griglia, τ, Δx, Δt, Re reale e simulato, bloccaggio d'area. Proposta di
+  camera: a monte 1,5 L, a valle 3 L (più corta del 2D, per le celle), bloccaggio d'area ≤ 8%
+  (10% per i veicoli). I tre contratti di §5 hanno così una variante 3D, coperta dal test 5.
+- **Celle e prestazioni stimate**: Bozza ~0,5 M, Normale ~1,5 M, Fine ~4 M di celle. D3Q19 muove
+  152 B per cella e passo: sull'Iris Xe (~70 GB/s) si stimano 180–280 M celle/s, cioè 120–180
+  passi/s a Normale, 4–6 passi per fotogramma a 30 fps; il flusso percorre una lunghezza del
+  corpo in 3–4 s. Memoria: ~230 MB a Normale, ~600 MB a Fine. **Da misurare** prima di fissare
+  i preset (come §17).
+- **Voxelizzazione** nel Web Worker dalla mesh piena (`mesh.bin`, §7.2): parità dei raggi lungo
+  z per colonna, con i triangoli raggruppati per colonne; per una mesh non chiusa, voto di
+  maggioranza su raggi lungo i tre assi. Una cella è solida se il suo centro è dentro.
+- **Resa**: un piccolo renderer WebGPU proprio (niente dipendenze nuove): modello (mesh di vista
+  §6.6) con Cp in superficie, piano di taglio, filamenti di fumo (striscie di punti emessi dagli
+  ugelli e trasportati con RK2 sulla GPU), particelle, pavimento e camera di prova. Le scene
+  three.js del 2D restano come sono.
+- **Forze**: scambio di quantità di moto sui collegamenti fluido–voxel, ridotto sulla GPU ogni 8
+  passi e letto in modo asincrono; area frontale proiettata dai voxel; stesse regole di media,
+  convergenza e instabilità di §9.5.
+- **Avvisi**: «Similitudine parziale» quasi sempre attivo (un'auto a 30 m/s ha Re ~10⁷, la griglia
+  ne simula ~10³), con una spiegazione adatta alla scuola; «Griglia grossolana: i dettagli più
+  piccoli di una cella non esistono per il flusso».
+
+### 24.4 Test e accettazione (proposta)
+
+- Costanti D3Q19 generate e confrontate (come test 20); solutore di riferimento 3D in Numba su
+  una griglia piccola (32³) contro lo shader WGSL (come test 25).
+- Validazione fisica (`-m slow`): sfera a Re 20 (Cd di riferimento ≈ 2,6) e a Re 100 (≈ 1,09),
+  con la correzione di bloccaggio, entro il 15% alla risoluzione Normale; canale quadrato di
+  Poiseuille.
+- Voxelizzazione (vitest): sfera, cubo, toro, cubo con un buco.
+- E2E: modello → galleria 3D → fumo, particelle, piano, Cp in superficie → studio salvato →
+  report; zero errori in console; test 4 (nessuna rete) con una sessione 3D.
+- Misure: ≥ 30 fps a Normale con fumo e particelle; voxelizzazione di 1 M triangoli ≤ 2 s.
+
+### 24.5 Ordine dei lavori (proposta)
+
+7a solutore 3D e validazione senza interfaccia; 7b galleria 3D (resa, fumo, particelle, piano,
+Cp, camera, pavimento, preset); 7c numeri, studi 3D, confronto, VTK, PDF. Revisione dell'utente
+alla fine di ciascuna.

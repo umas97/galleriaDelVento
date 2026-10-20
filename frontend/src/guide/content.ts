@@ -7,7 +7,7 @@ export const GUIDE_SECTIONS = {
   symbols: ['v', 'lref', 'c', 'alpha', 'rho', 'nu', 'q', 'pinf', 're', 'resim', 'ma', 'tc', 'blockage', 'dx', 'dt', 'ulat', 'tau', 'omega', 'f', 'perm'],
   coefficients: ['cd', 'cl', 'cm', 'clcd', 'cp', 'st', 'forces', 'mean', 'convergence', 'similarity'],
   charts: ['history', 'cp', 'probes', 'polar', 'speed', 'depth', 'hollow'],
-  views: ['speed', 'pressure', 'vorticity', 'smoke', 'particles', 'streamlines', 'legend', 'outline'],
+  views: ['speed', 'pressure', 'vorticity', 'smoke', 'particles', 'streamlines', 'legend', 'outline', 'floor'],
   status: ['ramp', 'transient', 'provisional', 'converged', 'unstable', 'partial', 'section2d', 'repaired', 'mach'],
   shortcuts: ['general', 'tunnel', 'view', 'tools', 'model', 'editor'],
 } as const

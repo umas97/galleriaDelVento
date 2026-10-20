@@ -146,6 +146,28 @@ try {
   await running(page)
   assert((await page.getByTestId('tunnel-top').textContent()).includes('NACA 0012'), 'the same profile after «Riprendi»')
 
+  // --- the floor: a distance to type, a line to drag, never into it ----------------------------
+  await page.getByLabel('Pavimento').selectOption('moving')
+  await page.getByTestId('clearance-row').waitFor({ timeout: 30000 })
+  await running(page)
+  const clearance = page.getByTestId('clearance')
+  await clearance.fill('0,25')
+  await clearance.press('Enter')
+  await page.waitForFunction(() => /^0,25/.test(document.querySelector('[data-testid="clearance"]').value))
+  await page.getByTestId('clearance-touch').click()
+  // On the moving floor «Appoggia» leaves the gap of 3 cells: not 0, never negative.
+  await page.waitForFunction(() => /^0,0[1-9]/.test(document.querySelector('[data-testid="clearance"]').value))
+  await running(page)
+  assert((await page.getByTestId('unstable').count()) === 0, 'stable on the belt')
+  // Dragging the body down stops on the floor.
+  const ob = await overlay.boundingBox()
+  await page.mouse.move(ob.x + ob.width * 0.3, ob.y + ob.height * 0.5)
+  await clearance.fill('0,5')
+  await clearance.press('Enter')
+  await page.waitForTimeout(300)
+  await shot(page, 'floor')
+  assert(!(await page.getByTestId('clearance').inputValue()).startsWith('-'), 'never below the floor')
+
   // --- the theme follows the system (SPEC §12.3) -------------------------------------------------
   const background = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor)
   await page.emulateMedia({ colorScheme: 'dark' })
@@ -180,6 +202,39 @@ try {
   await page.getByTestId('scene-shrink').click()
   await big.waitFor({ state: 'detached' })
   await page.getByTestId('tunnel-scene').waitFor()
+
+  // --- the editor: points added and removed without changing tool --------------------------------
+  await page.goto(`${app.url}profili/nuovo`)
+  const canvasBox = await page.getByTestId('editor-canvas').boundingBox()
+  const count = async () => Number((await page.getByTestId('loop-0-count').textContent()).match(/\d+/)[0])
+  const start = await count()
+  // Sweep across the middle until the «+» shows on the curve, then press there.
+  let found = false
+  let x = canvasBox.x + 20
+  for (; x < canvasBox.x + canvasBox.width; x += 3) {
+    await page.mouse.move(x, canvasBox.y + canvasBox.height / 2)
+    found = (await page.getByTestId('ghost-point').count()) > 0
+    if (found) break
+  }
+  assert(found, 'the «+» appears on the curve')
+  await page.mouse.down()
+  await page.mouse.move(x - 8, canvasBox.y + canvasBox.height / 2 - 12, { steps: 4 })
+  await page.mouse.up()
+  // (the new profile is symmetric: a point and its mirror)
+  const pulled = await count()
+  assert(pulled > start, `a point pulled out of the curve (${start} → ${pulled})`)
+  await page.keyboard.press('Delete')
+  assert((await count()) === start, 'Canc removes it')
+  await page.keyboard.press('Control+z')
+  assert((await count()) === pulled, 'one undo step brings it back')
+  await page.getByTestId('loop-0-densify').click()
+  const dense = await count()
+  assert(dense >= 2 * pulled - 2, `«Infittisci» about doubles the points (${pulled} → ${dense})`)
+  await page.getByTestId('loop-0-simplify').click()
+  assert((await count()) < dense, '«Semplifica» removes some')
+  await page.getByTestId('loop-0-polyline').click()
+  await page.getByTestId('loop-0-spline').click()
+  await shot(page, 'editor')
 
   assert(errors.length === 0, `console errors:\n${errors.join('\n')}`)
   console.log('OK')

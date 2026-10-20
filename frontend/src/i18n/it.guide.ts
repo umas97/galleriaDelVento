@@ -145,6 +145,9 @@ export const itGuide = {
   'guide.views.outline.term': 'Contorno e sonde',
   'guide.views.outline.text': 'Il contorno del corpo è chiaro, colorato per Cp quando c’è la curva media; rosso dove esce dalla camera (quella parte è tagliata). Le sonde sono cerchi gialli numerati.',
 
+  'guide.views.floor.term': 'Pavimento',
+  'guide.views.floor.text': 'La linea in basso nella vista. «Fisso» (tratteggio fermo): un pavimento con attrito, che rallenta l’aria vicino a sé, come il terreno attorno a un edificio. «Mobile» (tratteggio che scorre): un nastro alla velocità del vento, come la strada vista da un’auto in corsa: niente strato limite finto sotto il corpo. Trascina la linea o il corpo, o scrivi la distanza nelle condizioni: il corpo si ferma sul pavimento, mai dentro.',
+
   // --- status ---------------------------------------------------------------------
   'guide.status.ramp.term': 'Avvio',
   'guide.status.ramp.text': 'La velocità sale da zero a V con una rampa dolce, per non generare onde di pressione.',
@@ -173,9 +176,9 @@ export const itGuide = {
   'guide.shortcuts.view.term': 'Vista della galleria',
   'guide.shortcuts.view.text': 'Rotella: zoom attorno al cursore · trascina il fluido (strumento «Sposta») o con il tasto centrale: sposta la vista · + e − zoom · 0 vista intera · doppio clic sul fluido: vista intera.',
   'guide.shortcuts.tools.term': 'Strumenti della galleria',
-  'guide.shortcuts.tools.text': '«Sposta»: trascina il corpo; Maiusc+trascina ruota l’incidenza (0,25° per pixel). «Sonde»: clic aggiunge, trascina sposta, clic destro elimina. «Rastrello»: trascina una linea, clic destro torna al rastrello a monte.',
+  'guide.shortcuts.tools.text': '«Sposta»: trascina il corpo; Maiusc+trascina ruota l’incidenza (0,25° per pixel); trascina la linea del pavimento per cambiarne la distanza dal corpo. «Sonde»: clic aggiunge, trascina sposta, clic destro elimina. «Rastrello»: trascina una linea, clic destro torna al rastrello a monte.',
   'guide.shortcuts.model.term': 'Modello 3D e sezioni',
   'guide.shortcuts.model.text': 'PagSu/PagGiù e rotella sullo slider: profondità ±1% (Maiusc ±0,1%) · nella sezione, frecce su/giù: incidenza ±0,5° (Maiusc ±5°) · mini-scena: trascina per orbitare, rotella per lo zoom, tasto destro per spostare; «Ingrandisci» la apre sopra la galleria.',
   'guide.shortcuts.editor.term': 'Editor dei profili',
-  'guide.shortcuts.editor.text': 'Ctrl+Z annulla · Ctrl+Maiusc+Z o Ctrl+Y ripete · rotella: zoom attorno al cursore · trascina lo sfondo: sposta la vista · doppio clic su un punto: spigolo o punto liscio.',
+  'guide.shortcuts.editor.text': 'Con «Sposta» tutto senza cambiare strumento: trascina un punto per spostarlo; premi sulla curva (dove compare il «+») per tirarne fuori uno nuovo; clic destro o Canc sul punto per toglierlo; doppio clic: spigolo o punto liscio (due spigoli vicini fanno un tratto dritto). «Infittisci» raddoppia i punti, «Semplifica» toglie quelli che non servono. Ctrl+Z annulla · Ctrl+Maiusc+Z o Ctrl+Y ripete · rotella: zoom attorno al cursore · trascina lo sfondo: sposta la vista.',
 } as const
