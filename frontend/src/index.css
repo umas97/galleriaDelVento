@@ -22,12 +22,45 @@
   --color-warn: #c99a4a;
   --color-danger: #e06c6c;
   --color-ok: #7fbf7f;
+  /* A body in the views (profile, editor): light grey on dark. */
+  --color-body: #c9ced8;
+  --color-body-line: #e8ecf4;
+}
+
+/* The light theme follows the system (SPEC §12.3): the same tokens, light.
+ * The colour maps of the flow do not change with the theme. */
+@media (prefers-color-scheme: light) {
+  :root {
+    --color-ink-950: #ffffff;
+    --color-ink-900: #f6f6f7;
+    --color-ink-850: #eeeef0;
+    --color-ink-800: #e6e6e9;
+    --color-ink-700: #d9d9de;
+    --color-ink-600: #c7c7cd;
+    --color-ink-500: #a8a8b0;
+    --color-ink-400: #85858d;
+    --color-ink-300: #5d5d65;
+    --color-ink-200: #3d3d44;
+    --color-ink-100: #26262b;
+    --color-ink-50: #111114;
+    --color-accent: #2f5fc8;
+    --color-warn: #8a5a00;
+    --color-danger: #b8322f;
+    --color-ok: #2b7a2b;
+    --color-body: #8790a3;
+    --color-body-line: #3d4454;
+  }
 }
 
 html,
 body,
 #root {
   height: 100%;
+}
+
+:root {
+  /* Native controls (checkboxes, selects, scrollbars) follow the theme too. */
+  color-scheme: light dark;
 }
 
 body {
@@ -65,6 +98,7 @@ textarea {
   --color-ok: #2b7a2b;
   background: #ffffff;
   color: #222222;
+  color-scheme: light;
   user-select: text;
 }
 

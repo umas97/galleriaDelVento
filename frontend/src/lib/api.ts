@@ -19,7 +19,9 @@ import type {
   ProfileDraft,
   ProfileEnvelope,
   ProfileSummary,
+  SettingsEnvelope,
   SketchInfo,
+  StorageReport,
   SketchParams,
   SketchPreview,
   SketchStage,
@@ -199,6 +201,10 @@ export const api = {
   exportStudy: (id: string, what: string) => download(`/api/studies/${id}/${what}`),
   reportChrome: () => request<{ available: boolean }>('/api/reports/chrome'),
   claimReport: (token: string) => request<{ study_id: string }>('/api/reports/claim', { method: 'POST', body: json({ token }) }),
+  settings: () => request<SettingsEnvelope>('/api/settings'),
+  setSetting: (key: string, value: unknown) =>
+    request<SettingsEnvelope>(`/api/settings/${key}`, { method: 'PUT', body: json({ value }) }),
+  storage: () => request<StorageReport>('/api/settings/storage'),
   sketchSheetUrl: (id: string, corners: readonly (readonly [number, number])[] | null) =>
     `/api/sketches/${id}/sheet.jpg${corners ? `?corners=${corners.flat().map((v) => v.toFixed(5)).join(',')}` : ''}`,
 }

@@ -20,6 +20,9 @@ import { ErrorNotice } from '../components/ErrorNotice'
 import { Tip } from '../components/Tip'
 import { api } from '../lib/api'
 import { setUnsaved } from '../lib/busy'
+import { useSetSetting, useSettings } from '../lib/settings'
+import { remember } from './lastCase'
+import { token, useTheme } from '../lib/theme'
 import { isTextField, metres, num } from '../lib/format'
 import type { CasePlan, CaseSetup, Fluid, Ground, InletProfile, ProfileDraft, ReferenceKind, Resolution, SeriesParameter } from '../lib/types'
 import type { Pt } from '../profile/geometry'
@@ -32,6 +35,7 @@ import { ProbeChart } from '../charts/ProbeChart'
 import { Results } from './Results'
 import { StudyPanel, type StudyHost } from './StudyPanel'
 import { Badge, Legend, NumberField, Panel, Row, Select, digitsFor } from './parts'
+import { GuideLink } from '../guide/Guide'
 
 export type CaseState = {
   fluid: Fluid
@@ -82,35 +86,7 @@ declare global {
   }
 }
 
-const STORE = 'tunnel-case'
-const SPEED_UNIT = 'speed-unit'
 const SPEED_LIMITS: [number, number] = [0.1, 120]
-
-export function rememberedCase(): Partial<CaseState> {
-  try {
-    const raw = localStorage.getItem(STORE)
-    return raw ? (JSON.parse(raw) as Partial<CaseState>) : {}
-  } catch {
-    return {}
-  }
-}
-
-function remember(state: CaseState): void {
-  try {
-    const { fluid, temperature_c, speed, resolution } = state
-    localStorage.setItem(STORE, JSON.stringify({ fluid, temperature_c, speed, resolution }))
-  } catch {
-    // nothing to remember it with
-  }
-}
-
-function readUnit(): 'm/s' | 'km/h' {
-  try {
-    return localStorage.getItem(SPEED_UNIT) === 'km/h' ? 'km/h' : 'm/s'
-  } catch {
-    return 'm/s'
-  }
-}
 
 const TEMPERATURES: Record<Fluid, [number, number]> = { aria: [-20, 50], acqua: [5, 40] }
 
@@ -151,6 +127,7 @@ export function TunnelCore({
   initial,
   back,
   modelPanel,
+  scene,
   onPlan,
   onPlacement,
   saveSection,
@@ -162,6 +139,8 @@ export function TunnelCore({
   initial: CaseState
   back: { to: string; label: string }
   modelPanel?: ReactNode
+  /** The model's mini-scene: outside what a series locks (the view is free during a series). */
+  scene?: ReactNode
   onPlan?: (plan: CasePlan) => void
   /** Where the body sits in the chamber and its incidence, whenever they change. */
   onPlacement?: (position: Pt, angleDeg: number) => void
@@ -180,14 +159,16 @@ export function TunnelCore({
   const [planning, setPlanning] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [snap, setSnap] = useState<EngineSnapshot | null>(null)
-  const [unit, setUnit] = useState(readUnit)
+  const { values: settings } = useSettings()
+  const setSetting = useSetSetting()
+  const unit = settings.unita_velocita
   const [view, setView] = useState<ViewState>({
     field: 'speed',
     smoke: false,
     particles: false,
     streamlines: false,
-    sequential: 'viridis',
-    diverging: 'coolwarm',
+    sequential: settings.mappa_sequenziale,
+    diverging: settings.mappa_divergente,
     locked: null,
   })
   const [tool, setTool] = useState<Tool>('move')
@@ -347,7 +328,15 @@ export function TunnelCore({
     if (ready && planRef.current && body.is3d && state.reference_mode === 'section') void requestPlan(true)
   }, [body.depthKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => remember(state), [state])
+  useEffect(() => remember(state, settings), [state, settings])
+  // The colour maps and the steps per frame follow the settings (SPEC §14.3).
+  useEffect(() => {
+    setView((v) => ({ ...v, sequential: settings.mappa_sequenziale, diverging: settings.mappa_divergente }))
+  }, [settings.mappa_sequenziale, settings.mappa_divergente])
+  const fixedSteps = settings.passi_per_frame === 'auto' ? null : settings.passi_per_frame
+  useEffect(() => engine.current?.setStepsPerFrame(fixedSteps), [fixedSteps, engineKey])
+  const theme = useTheme()
+  useEffect(() => engine.current?.setBackground(token('ink-900')), [theme, engineKey])
 
   // --- body and placement ---------------------------------------------------------
   useEffect(() => {
@@ -380,27 +369,45 @@ export function TunnelCore({
     | { kind: 'rotate'; startY: number; angle: number }
     | { kind: 'probe'; index: number }
     | { kind: 'rake'; start: Pt }
+    | { kind: 'pan'; x: number; y: number }
     | null
   >(null)
+  const [zoom, setZoom] = useState(1)
+  const [panning, setPanning] = useState(false)
+  const syncZoom = () => setZoom(engine.current?.zoomLevel ?? 1)
 
   const probeAt = (cell: Pt): number => {
     const e = engine.current
     if (!e) return -1
-    const rect = overlayRef.current!.getBoundingClientRect()
-    const cellsPerCss = (planRef.current ? planRef.current.nx : 1) / Math.max(1, rect.width)
-    return probes.findIndex((p) => Math.hypot(p.x - cell[0], p.y - cell[1]) < 8 * Math.max(cellsPerCss, 0.5))
+    const cellsPerCss = e.cellsPerCssPixel()
+    return probes.findIndex((p) => Math.hypot(p.x - cell[0], p.y - cell[1]) < 8 * Math.max(cellsPerCss, 0.05))
   }
 
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const e = engine.current
     const p = planRef.current
-    if (!e || !p || lockedRef.current) return
+    if (!e || !p) return
     const cell = e.toCells(event.clientX, event.clientY)
     if (event.button === 2) return
     ;(event.target as HTMLElement).setPointerCapture(event.pointerId)
+    // The view moves whatever the tool, with the middle button -- and during a series too.
+    const pan = () => {
+      drag.current = { kind: 'pan', x: event.clientX, y: event.clientY }
+      setPanning(true)
+    }
+    if (event.button === 1) {
+      event.preventDefault()
+      pan()
+      return
+    }
+    if (lockedRef.current) {
+      pan()
+      return
+    }
     if (tool === 'move') {
       if (event.shiftKey) drag.current = { kind: 'rotate', startY: event.clientY, angle: latest.current.state.angle_deg }
       else if (e.hitsBody(cell) && position.current) drag.current = { kind: 'body', start: cell, origin: position.current }
+      else pan()
     } else if (tool === 'probe') {
       const hit = probeAt(cell)
       if (hit >= 0) drag.current = { kind: 'probe', index: hit }
@@ -418,6 +425,11 @@ export function TunnelCore({
     const p = planRef.current
     const d = drag.current
     if (!e || !p || !d) return
+    if (d.kind === 'pan') {
+      e.panBy(event.clientX - d.x, event.clientY - d.y)
+      drag.current = { kind: 'pan', x: event.clientX, y: event.clientY }
+      return
+    }
     const cell = e.toCells(event.clientX, event.clientY)
     if (d.kind === 'body') {
       const next: Pt = [
@@ -441,6 +453,7 @@ export function TunnelCore({
   const onPointerUp = () => {
     const d = drag.current
     drag.current = null
+    setPanning(false)
     if (d?.kind === 'rotate') void requestPlan(true)
     if (d?.kind === 'body' && position.current) onPlacement?.(position.current, latest.current.state.angle_deg)
   }
@@ -454,6 +467,33 @@ export function TunnelCore({
       if (hit >= 0) setProbes((list) => list.filter((_, i) => i !== hit))
     } else if (tool === 'rake') setRake(null)
   }
+
+  // Wheel: zoom about the pointer. A native listener, because React's is passive
+  // and the page would get the wheel too.
+  useEffect(() => {
+    const overlay = overlayRef.current
+    if (!overlay) return
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault()
+      const e = engine.current
+      if (!e) return
+      const lines = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY
+      e.zoomAt(event.clientX, event.clientY, Math.exp(-lines * 0.0015))
+      syncZoom()
+    }
+    overlay.addEventListener('wheel', onWheel, { passive: false })
+    return () => overlay.removeEventListener('wheel', onWheel)
+  }, [engineKey, support.ok])
+
+  const zoomBy = (factor: number) => {
+    engine.current?.zoomBy(factor)
+    syncZoom()
+  }
+  const fitView = () => {
+    engine.current?.resetView()
+    syncZoom()
+  }
+  useEffect(() => syncZoom(), [plan])
 
   // --- snapshot and video (SPEC §10.7) ---------------------------------------------
   const caption = useCallback((): string[] => {
@@ -499,12 +539,12 @@ export function TunnelCore({
     out.width = image.width
     out.height = image.height + pad * 2 + lineHeight * lines.length + 40
     const ctx = out.getContext('2d')!
-    ctx.fillStyle = '#111111'
+    ctx.fillStyle = token('ink-900')
     ctx.fillRect(0, 0, out.width, out.height)
     ctx.drawImage(image, 0, 0)
     // Legend: the colour bar and its range in real units.
     const legend = document.querySelector<HTMLElement>('[data-testid="legend"]')
-    ctx.fillStyle = '#d4d4d4'
+    ctx.fillStyle = token('ink-100')
     ctx.font = '22px sans-serif'
     let y = image.height + pad + 22
     if (legend) {
@@ -543,11 +583,11 @@ export function TunnelCore({
         comp.width = w
         comp.height = h + 60
       }
-      ctx.fillStyle = '#111111'
+      ctx.fillStyle = token('ink-900')
       ctx.fillRect(0, 0, comp.width, comp.height)
       ctx.drawImage(e.canvas, 0, 0)
       ctx.drawImage(e.overlay, 0, 0)
-      ctx.fillStyle = '#d4d4d4'
+      ctx.fillStyle = token('ink-100')
       ctx.font = '16px sans-serif'
       lines.slice(1, 3).forEach((line, i) => ctx.fillText(line, 10, h + 22 + i * 20))
     }
@@ -653,8 +693,17 @@ export function TunnelCore({
   // --- keyboard (SPEC §12.2) ------------------------------------------------------------
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (lockedRef.current) return
       if (isTextField(event.target) || event.ctrlKey || event.metaKey || event.altKey) return
+      // The view zooms during a series too: it changes nothing of the case.
+      if (event.key === '+' || event.key === '=' || event.key === '-' || event.key === '0') {
+        const e = engine.current
+        if (event.key === '0') e?.resetView()
+        else e?.zoomBy(event.key === '-' ? 1 / 1.5 : 1.5)
+        setZoom(e?.zoomLevel ?? 1)
+        event.preventDefault()
+        return
+      }
+      if (lockedRef.current) return
       const e = engine.current
       const target = event.target as HTMLElement | null
       const onSlider = target?.getAttribute('type') === 'range'
@@ -838,6 +887,7 @@ export function TunnelCore({
             <Tip text={t('tunnel.top.tau.tip')}>
               <span className="cursor-help">τ {num(plan.tau, 4)}</span>
             </Tip>
+            <GuideLink section="symbols" entry="re" />
             <span data-testid="top-steps">{t('tunnel.top.steps', { value: num(snap?.stepsPerSecond ?? 0, 0) })}</span>
             <span data-testid="top-fps">{t('tunnel.top.fps', { value: snap?.fps ?? 0 })}</span>
           </>
@@ -868,7 +918,7 @@ export function TunnelCore({
             </Button>
           </div>
 
-          <Panel title={t('tunnel.conditions')} tip={t('tunnel.replan.tip')}>
+          <Panel title={t('tunnel.conditions')} tip={t('tunnel.replan.tip')} guide={{ section: 'symbols' }}>
             <Row label={t('tunnel.fluid')}>
               <Select<Fluid>
                 value={state.fluid}
@@ -909,15 +959,7 @@ export function TunnelCore({
                 <button
                   className="rounded px-1 text-xs text-accent hover:underline"
                   aria-label={t('tunnel.speed.unit')}
-                  onClick={() => {
-                    const next = unit === 'km/h' ? 'm/s' : 'km/h'
-                    setUnit(next)
-                    try {
-                      localStorage.setItem(SPEED_UNIT, next)
-                    } catch {
-                      // nothing to remember it with
-                    }
-                  }}
+                  onClick={() => setSetting.mutate({ key: 'unita_velocita', value: unit === 'km/h' ? 'm/s' : 'km/h' })}
                 >
                   ⇄
                 </button>
@@ -1030,7 +1072,7 @@ export function TunnelCore({
             ) : null}
           </Panel>
 
-          <Panel title={t('tunnel.view')}>
+          <Panel title={t('tunnel.view')} guide={{ section: 'views' }}>
             <div className="grid grid-cols-1 gap-1">
               {(['speed', 'pressure', 'vorticity'] as const).map((f) => (
                 <label key={f} className="flex items-center gap-2">
@@ -1072,6 +1114,7 @@ export function TunnelCore({
 
           <div className={locked ? 'pointer-events-none opacity-60' : ''}>{modelPanel}</div>
           </fieldset>
+          {scene}
           <StudyPanel
             subject={{ name: body.name, profileId: body.profileId, model: body.model, is3d: body.is3d }}
             host={studyHost}
@@ -1085,8 +1128,13 @@ export function TunnelCore({
           <canvas
             key={`ov-${engineKey}`}
             ref={overlayRef}
-            className={`absolute inset-0 h-full w-full ${tool === 'move' ? 'cursor-grab' : 'cursor-crosshair'}`}
+            className={`absolute inset-0 h-full w-full ${panning ? 'cursor-grabbing' : tool === 'move' || locked ? 'cursor-grab' : 'cursor-crosshair'}`}
             data-testid="tunnel-overlay"
+            onDoubleClick={(event) => {
+              const e = engine.current
+              if (!e || (tool !== 'move' && !locked) || e.hitsBody(e.toCells(event.clientX, event.clientY))) return
+              fitView()
+            }}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
@@ -1150,7 +1198,23 @@ export function TunnelCore({
               </Button>
             </div>
           ) : null}
-          {planError ? <ErrorNotice error={planError} className="absolute bottom-4 left-4 max-w-md" /> : null}
+          <div className="absolute bottom-2 left-2 flex items-center gap-0.5 rounded bg-ink-850/90 p-0.5 text-xs text-ink-200" data-testid="zoom-controls">
+            <button className="rounded px-2 py-0.5 hover:bg-ink-700" onClick={() => zoomBy(1 / 1.5)} aria-label={t('tunnel.zoom.out')} title={t('tunnel.zoom.out')}>
+              −
+            </button>
+            <Tip text={t('tunnel.zoom.tip')}>
+              <span className="min-w-12 cursor-help px-1 text-center font-mono" data-testid="zoom-level">
+                {t('tunnel.zoom.level', { value: num(zoom, zoom < 10 ? 1 : 0) })}
+              </span>
+            </Tip>
+            <button className="rounded px-2 py-0.5 hover:bg-ink-700" onClick={() => zoomBy(1.5)} aria-label={t('tunnel.zoom.in')} title={t('tunnel.zoom.in')}>
+              +
+            </button>
+            <button className="rounded px-2 py-0.5 hover:bg-ink-700 disabled:opacity-40" disabled={zoom === 1} onClick={fitView} title={t('tunnel.zoom.fit')} data-testid="zoom-fit">
+              {t('tunnel.zoom.fitShort')}
+            </button>
+          </div>
+          {planError ? <ErrorNotice error={planError} className="absolute bottom-12 left-4 max-w-md" /> : null}
           {bench ? (
             <pre className="absolute top-12 left-3 rounded bg-ink-950/90 p-2 text-xs" data-testid="bench-result">
               {JSON.stringify(bench)}
@@ -1168,7 +1232,7 @@ export function TunnelCore({
         {results && plan && snap ? (
           <aside className="w-96 shrink-0 overflow-y-auto border-l border-ink-700 bg-ink-850 p-3" data-testid="results-panel">
             <Results plan={plan} snapshot={snap} badges={badges} />
-            <Panel title={t('tunnel.probes')}>
+            <Panel title={t('tunnel.probes')} guide={{ section: 'charts', entry: 'probes' }}>
               {snap.probes.length ? (
                 <ul className="space-y-1 text-xs" data-testid="probes">
                   {snap.probes.map((p, i) => (

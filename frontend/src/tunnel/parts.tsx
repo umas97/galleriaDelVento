@@ -6,10 +6,25 @@
 // flow at every digit), and the colour legend.
 import { useEffect, useState, type ReactNode } from 'react'
 import { Tip } from '../components/Tip'
+import { GuideLink } from '../guide/Guide'
+import type { GuideTarget } from '../guide/content'
 import { num, parseDecimal } from '../lib/format'
 import { colorAt, type ColorMap } from '../sim2d/colormaps'
 
-export function Panel({ title, children, tip, testId }: { title: string; children: ReactNode; tip?: string; testId?: string }) {
+export function Panel({
+  title,
+  children,
+  tip,
+  testId,
+  guide,
+}: {
+  title: string
+  children: ReactNode
+  tip?: string
+  testId?: string
+  /** Where the guide explains what the panel shows. */
+  guide?: GuideTarget
+}) {
   return (
     <section className="space-y-2 border-t border-ink-700 pt-3" data-testid={testId}>
       {title ? (
@@ -20,6 +35,7 @@ export function Panel({ title, children, tip, testId }: { title: string; childre
               <span className="cursor-help text-xs text-ink-300">ⓘ</span>
             </Tip>
           ) : null}
+          {guide ? <GuideLink {...guide} className="ml-auto" /> : null}
         </h3>
       ) : null}
       {children}

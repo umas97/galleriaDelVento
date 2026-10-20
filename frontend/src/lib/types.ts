@@ -588,3 +588,25 @@ export type Comparison = {
   comparable: boolean
   warning: string | null
 }
+
+// --- persistent settings (SPEC §14.3) ---------------------------------------------
+
+export type AppSettings = {
+  unita_velocita: 'm/s' | 'km/h'
+  fluido_predefinito: Fluid
+  temperatura_predefinita_c: number
+  risoluzione: Resolution
+  mappa_sequenziale: 'viridis' | 'inferno' | 'cividis'
+  mappa_divergente: 'coolwarm' | 'RdBu'
+  csv_separatore: ';' | ','
+  passi_per_frame: 'auto' | number
+  riferimento_in_profondita: 'fissa' | 'sezione'
+}
+
+export type SettingsEnvelope = { values: AppSettings; defaults: AppSettings }
+
+export type StorageReport = {
+  path: string
+  parts: { folder: 'modelli' | 'profili' | 'foto' | 'disegni' | 'studi'; bytes: number; files: number }[]
+  total_bytes: number
+}

@@ -4,7 +4,7 @@
 // The frame every screen sits in: the name and "Esci", which is how a desktop
 // program ends without hunting for the terminal it was started from.
 // In a browser window it also shows the notice that explains a tab.
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
@@ -12,6 +12,7 @@ import { leaveWarning, useBusy } from '../lib/busy'
 import { Button, Dialog } from './Dialog'
 import { t } from '../i18n/it'
 import { WindowBanner } from './WindowBanner'
+import { useGuide } from '../guide/Guide'
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { data: window_ } = useQuery({ queryKey: ['window'], queryFn: api.window })
@@ -21,6 +22,18 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [asking, setAsking] = useState<{ message: string; go: () => void } | null>(null)
   const busy = useBusy()
   const navigate = useNavigate()
+  const guide = useGuide()
+  // The guide opens under the header, so the header's own buttons stay usable.
+  const header = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const el = header.current
+    if (!el) return
+    const set = () => document.documentElement.style.setProperty('--shell-top', `${Math.round(el.getBoundingClientRect().bottom)}px`)
+    set()
+    const observer = new ResizeObserver(set)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
 
   /** Whatever leaving loses is said first (SPEC §13): a series, unsaved results. */
   const guarded = (go: () => void) => {
@@ -45,7 +58,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="print:hidden">
         <WindowBanner info={window_} />
       </div>
-      <header className="flex items-center justify-between border-b border-ink-700 bg-ink-850 px-4 py-2.5 print:hidden">
+      <header ref={header} className="flex items-center justify-between border-b border-ink-700 bg-ink-850 px-4 py-2.5 print:hidden">
         <h1 className="text-base font-semibold text-ink-50">
           <Link
             to="/"
@@ -60,15 +73,37 @@ export function AppShell({ children }: { children: ReactNode }) {
             {t('app.name')}
           </Link>
         </h1>
-        {window_?.can_quit ? (
+        <nav className="flex items-center gap-1">
           <button
-            className="rounded-md px-3 py-1 text-ink-200 hover:bg-ink-700 disabled:opacity-60"
-            onClick={() => guarded(() => void quit())}
-            disabled={quitting}
+            className={`rounded-md px-3 py-1 text-ink-200 hover:bg-ink-700 ${guide.isOpen ? 'bg-ink-700' : ''}`}
+            onClick={() => (guide.isOpen ? guide.close() : guide.open())}
+            title={t('nav.guide.tip')}
+            data-testid="nav-guide"
           >
-            {quitting ? t('nav.quitting') : t('nav.quit')}
+            {t('nav.guide')}
           </button>
-        ) : null}
+          <Link
+            to="/impostazioni"
+            className="rounded-md px-3 py-1 text-ink-200 hover:bg-ink-700"
+            data-testid="nav-settings"
+            onClick={(event) => {
+              if (!busy.series) return
+              event.preventDefault()
+              guarded(() => navigate('/impostazioni'))
+            }}
+          >
+            {t('nav.settings')}
+          </Link>
+          {window_?.can_quit ? (
+            <button
+              className="rounded-md px-3 py-1 text-ink-200 hover:bg-ink-700 disabled:opacity-60"
+              onClick={() => guarded(() => void quit())}
+              disabled={quitting}
+            >
+              {quitting ? t('nav.quitting') : t('nav.quit')}
+            </button>
+          ) : null}
+        </nav>
       </header>
       {error ? <p className="border-b border-ink-700 px-4 py-2 text-warn">{error}</p> : null}
       <main className="min-h-0 flex-1 overflow-hidden print:overflow-visible">{done ? <p className="p-6">{t('quit.done')}</p> : children}</main>

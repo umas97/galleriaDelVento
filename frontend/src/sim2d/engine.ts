@@ -20,7 +20,10 @@ import { outerLoops, place, rasterize, type OuterRule, type Placement } from './
 import { CoefficientSeries, type CoefSample, type SeriesStats } from './series'
 import { Solver, latticeParams, type LatticeParams, type Sample } from './solver'
 import { defaultSeeds, type Field } from './streamlines'
-import { FlowView, type FieldMode, type Transform } from './views'
+import { FlowView, hex3, type FieldMode, type Transform } from './views'
+import { MAX_ZOOM, clampCentre, viewTransform } from './viewport'
+
+export { MAX_ZOOM, clampCentre, viewTransform }
 
 export const MAX_PROBES = 6
 /** Instability (SPEC §9.5): a NaN, or a fluid density outside this range. */
@@ -123,6 +126,11 @@ export class TunnelEngine {
   private frameFence: WebGLSync | null = null
   private calm = 0
   private fixedSpf: number | null = null
+  /** The view: 1 = the whole chamber; centre in cells (null = the chamber's). */
+  private zoom = 1
+  /** Around the chamber: the page's background, so the theme carries through (SPEC §12.3). */
+  private outside: [number, number, number] = hex3('#111111')
+  private centre: Pt | null = null
   private running = false
   private pendingSingle = 0
   private rhoInf = 1
@@ -185,11 +193,13 @@ export class TunnelEngine {
     }
     this.solver?.dispose()
     this.view?.dispose()
+    if (this.params && (this.params.nx !== params.nx || this.params.ny !== params.ny)) this.resetView()
     this.params = params
     this.solver = new Solver(this.gl, params)
     this.startedAt = performance.now()
     this.view = new FlowView(this.gl, params.nx, params.ny)
     this.view.setColorMap(this.mapFor(this.options.field))
+    this.view.outside = this.outside
     this.series = new CoefficientSeries(seriesOptions)
     this.unstable = false
     this.rhoInf = 1
@@ -293,6 +303,68 @@ export class TunnelEngine {
     return [(px - t.originX) * t.cellsPerPixel, (py - t.originY) * t.cellsPerPixel]
   }
 
+  /** How many times the view is enlarged (1 = the whole chamber). */
+  get zoomLevel(): number {
+    return this.zoom
+  }
+
+  /** Zoom by `factor` keeping the cell under the pointer where it is. */
+  zoomAt(clientX: number, clientY: number, factor: number): void {
+    if (!this.params) return
+    const before = this.toCells(clientX, clientY)
+    const next = Math.min(MAX_ZOOM, Math.max(1, this.zoom * factor))
+    if (next === this.zoom) return
+    const centre = this.viewCentre(this.transform())
+    // The pointer's cell stays put: C' = P + (C − P) · old / new.
+    const k = this.zoom / next
+    this.zoom = next
+    this.centre = next === 1 ? null : [before[0] + (centre[0] - before[0]) * k, before[1] + (centre[1] - before[1]) * k]
+  }
+
+  /** Zoom about the middle of the view (the + and − keys). */
+  zoomBy(factor: number): void {
+    const rect = this.overlay.getBoundingClientRect()
+    this.zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, factor)
+  }
+
+  /** Move the view by a drag of (dx, dy) CSS pixels. */
+  panBy(dx: number, dy: number): void {
+    if (!this.params || this.zoom === 1) return
+    const rect = this.overlay.getBoundingClientRect()
+    const t = this.transform()
+    const dpr = this.canvas.width / Math.max(1, rect.width)
+    const [cx, cy] = this.viewCentre(t)
+    const scale = 1 / t.cellsPerPixel
+    this.centre = clampCentre(this.canvas.width, this.canvas.height, this.params.nx, this.params.ny, scale, [
+      cx - (dx * dpr) / scale,
+      cy + (dy * dpr) / scale,
+    ])
+  }
+
+  /** The colour around the chamber, as `#rrggbb`. */
+  setBackground(hex: string): void {
+    if (!/^#[0-9a-f]{6}$/i.test(hex)) return
+    this.outside = hex3(hex)
+    if (this.view) this.view.outside = this.outside
+  }
+
+  /** Chamber cells per CSS pixel of the canvas, at the current zoom. */
+  cellsPerCssPixel(): number {
+    const rect = this.overlay.getBoundingClientRect()
+    return this.transform().cellsPerPixel * (this.canvas.width / Math.max(1, rect.width))
+  }
+
+  /** Back to the whole chamber. */
+  resetView(): void {
+    this.zoom = 1
+    this.centre = null
+  }
+
+  /** The cell at the middle of the canvas. */
+  private viewCentre(t: Transform): Pt {
+    return [(this.canvas.width / 2 - t.originX) * t.cellsPerPixel, (this.canvas.height / 2 - t.originY) * t.cellsPerPixel]
+  }
+
   /** Whether a chamber point (cells) is on the body. */
   hitsBody(cell: Pt): boolean {
     if (!this.plan) return false
@@ -341,12 +413,7 @@ export class TunnelEngine {
   }
 
   private transform(): Transform {
-    const nx = this.params?.nx ?? 1
-    const ny = this.params?.ny ?? 1
-    const w = this.canvas.width
-    const h = this.canvas.height
-    const scale = Math.min(w / nx, h / ny)
-    return { originX: (w - nx * scale) / 2, originY: (h - ny * scale) / 2, cellsPerPixel: 1 / scale }
+    return viewTransform(this.canvas.width, this.canvas.height, this.params?.nx ?? 1, this.params?.ny ?? 1, this.zoom, this.centre)
   }
 
   private updateMask(): void {
@@ -607,7 +674,7 @@ export class TunnelEngine {
     const gl = this.gl
     gl.bindFramebuffer(gl.FRAMEBUFFER, null)
     gl.viewport(0, 0, this.canvas.width, this.canvas.height)
-    gl.clearColor(0.067, 0.067, 0.067, 1)
+    gl.clearColor(...this.outside, 1)
     gl.clear(gl.COLOR_BUFFER_BIT)
     this.overlay.getContext('2d')?.clearRect(0, 0, this.overlay.width, this.overlay.height)
   }

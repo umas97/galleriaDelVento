@@ -6,6 +6,7 @@
 // the width of its box.
 import { useEffect, useRef } from 'react'
 import uPlot from 'uplot'
+import { token, useTheme } from '../lib/theme'
 import 'uplot/dist/uPlot.min.css'
 
 export type ChartProps = {
@@ -26,10 +27,21 @@ export function Chart({ options, data, shape, height, className = '', testId }: 
   const latest = useRef(data)
   latest.current = data
 
+  const theme = useTheme()
+
   useEffect(() => {
     const el = box.current
     if (!el) return
-    const p = new uPlot({ ...options, width: Math.max(100, el.clientWidth), height }, latest.current, el)
+    // Axes in the theme's colours (a canvas does not read CSS variables).
+    const ink = { stroke: token('ink-300', el), grid: token('ink-700', el) }
+    const axes = options.axes?.map((a) => ({
+      ...a,
+      // Axes coloured on purpose (a probe's two scales) keep their colour.
+      stroke: a.stroke === undefined || a.stroke === AXIS.stroke ? ink.stroke : a.stroke,
+      grid: { ...a.grid, stroke: ink.grid },
+      ticks: { ...a.ticks, stroke: ink.grid },
+    }))
+    const p = new uPlot({ ...options, axes, width: Math.max(100, el.clientWidth), height }, latest.current, el)
     plot.current = p
     const observer = new ResizeObserver(() => p.setSize({ width: Math.max(100, el.clientWidth), height }))
     observer.observe(el)
@@ -39,7 +51,7 @@ export function Chart({ options, data, shape, height, className = '', testId }: 
       plot.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- rebuilt only when the shape changes
-  }, [shape, height])
+  }, [shape, height, theme])
 
   useEffect(() => {
     plot.current?.setData(data)

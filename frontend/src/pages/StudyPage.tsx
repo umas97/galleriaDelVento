@@ -13,20 +13,11 @@ import { Button, Dialog } from '../components/Dialog'
 import { ErrorNotice } from '../components/ErrorNotice'
 import { ApiError, api } from '../lib/api'
 import { bytes, num } from '../lib/format'
+import { useSetSetting, useSettings } from '../lib/settings'
 import type { Study, StudyEnvelope } from '../lib/types'
 import { sectionOf, studyStatus } from '../study/present'
 import { CoefficientsTable, ConditionsTable, MeanFields, PointCharts, STATUS_TONE, SectionStrip, SeriesCharts, Warnings } from '../study/StudyParts'
 import { t, type MessageKey } from '../i18n/it'
-
-const SEPARATOR = 'csv-separator'
-
-function readSeparator(): ';' | ',' {
-  try {
-    return localStorage.getItem(SEPARATOR) === ',' ? ',' : ';'
-  } catch {
-    return ';'
-  }
-}
 
 /** Back to the library, on the studies tab. */
 export function toStudies(): void {
@@ -60,7 +51,9 @@ function StudyView({ envelope }: { envelope: StudyEnvelope }) {
   const [k, setK] = useState(0)
   const [name, setName] = useState(study.name)
   const [notes, setNotes] = useState(study.notes)
-  const [separator, setSeparator] = useState(readSeparator)
+  const { values: settings } = useSettings()
+  const setSetting = useSetSetting()
+  const separator = settings.csv_separatore
   const [exportError, setExportError] = useState<unknown>(null)
   const [noChrome, setNoChrome] = useState(false)
   const [exporting, setExporting] = useState<string | null>(null)
@@ -194,15 +187,7 @@ function StudyView({ envelope }: { envelope: StudyEnvelope }) {
             <select
               className="rounded border border-ink-500 bg-ink-900 px-1 py-0.5"
               value={separator}
-              onChange={(e) => {
-                const v = e.target.value === ',' ? ',' : ';'
-                setSeparator(v)
-                try {
-                  localStorage.setItem(SEPARATOR, v)
-                } catch {
-                  // nothing to remember it with
-                }
-              }}
+              onChange={(e) => setSetting.mutate({ key: 'csv_separatore', value: e.target.value === ',' ? ',' : ';' })}
             >
               <option value=";">{t('study.export.semicolon')}</option>
               <option value=",">{t('study.export.comma')}</option>

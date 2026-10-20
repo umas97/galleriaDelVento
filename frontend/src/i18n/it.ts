@@ -5,7 +5,10 @@
 // so another language is translation work, not a refactor. Keys read like
 // paths: screen, then element. When this file grows, split it per screen
 // (it.home.ts, ...) and spread the parts in here.
+import { itGuide } from './it.guide'
+
 export const it = {
+  ...itGuide,
   'app.name': 'galleriaDelVento',
   'nav.quit': 'Esci',
   'nav.quitting': 'Chiusura in corso…',
@@ -13,6 +16,49 @@ export const it = {
   'nav.library': 'Libreria',
   'window.tabNotice.title': 'Aperto in una scheda del browser',
   'window.tabNotice.dismiss': 'Non mostrare più',
+  'nav.settings': 'Impostazioni',
+  'nav.guide': 'Guida',
+  'nav.guide.tip': 'Simboli, formule, grafici e scorciatoie (tasto ?)',
+
+  'settings.title': 'Impostazioni',
+  'settings.back': '← Libreria',
+  'settings.defaults': 'Valori predefiniti della galleria',
+  'settings.maps': 'Mappe dei colori',
+  'settings.unita_velocita': 'Unità della velocità',
+  'settings.unita_velocita.m/s': 'm/s',
+  'settings.unita_velocita.km/h': 'km/h',
+  'settings.fluido_predefinito': 'Fluido',
+  'settings.fluido_predefinito.aria': 'aria',
+  'settings.fluido_predefinito.acqua': 'acqua',
+  'settings.temperatura_predefinita_c': 'Temperatura (°C)',
+  'settings.risoluzione': 'Risoluzione',
+  'settings.risoluzione.tip': 'Bozza 512 × 192, Normale 1024 × 384, Fine 2048 × 768 celle (il rapporto segue la camera).',
+  'settings.risoluzione.bozza': 'Bozza',
+  'settings.risoluzione.normale': 'Normale',
+  'settings.risoluzione.fine': 'Fine',
+  'settings.riferimento_in_profondita': 'Lunghezza di riferimento in profondità',
+  'settings.riferimento_in_profondita.tip': 'Per le sezioni di un modello 3D: un valore fisso (coefficienti confrontabili tra sezioni) o quello della sezione corrente.',
+  'settings.riferimento_in_profondita.fissa': 'fissa',
+  'settings.riferimento_in_profondita.sezione': 'della sezione corrente',
+  'settings.csv_separatore': 'Separatore dei CSV',
+  'settings.csv_separatore.;': '«;» e virgola decimale',
+  'settings.csv_separatore.,': '«,» e punto decimale',
+  'settings.passi_per_frame': 'Passi per fotogramma',
+  'settings.passi_per_frame.tip': '«Automatico»: tanti quanti stanno in circa 12 ms di GPU. Le forze si leggono ogni 8 passi: un numero fisso si arrotonda al multiplo di 8.',
+  'settings.passi_per_frame.auto': 'automatico',
+  'settings.mappa_sequenziale': 'Velocità (sequenziale)',
+  'settings.mappa_sequenziale.tip': 'Per il modulo della velocità. Le mappe sono le stesse nel tema chiaro e scuro.',
+  'settings.mappa_divergente': 'Cp e vorticità (divergente)',
+  'settings.mappa_divergente.tip': 'Centrata sullo zero: blu i valori negativi, rosso i positivi.',
+  'settings.storage': 'Spazio occupato dalla libreria',
+  'settings.storage.modelli': 'Modelli 3D',
+  'settings.storage.profili': 'Profili 2D',
+  'settings.storage.foto': 'Foto degli schizzi',
+  'settings.storage.disegni': 'Disegni SVG e DXF',
+  'settings.storage.studi': 'Studi',
+  'settings.storage.files': '{count} file',
+  'settings.storage.files.one': '1 file',
+  'settings.storage.total': 'Totale',
   'quit.done': 'galleriaDelVento è stato chiuso. Puoi chiudere questa finestra.',
 
   'common.loading': 'Caricamento…',
@@ -181,6 +227,10 @@ export const it = {
   'scene.grid': 'quadretti da {size}',
   'scene.miniHide': 'Nascondi la scena 3D',
   'scene.miniShow': 'Mostra la scena 3D',
+  'scene.enlarge': 'Ingrandisci',
+  'scene.shrink': 'Riduci',
+  'scene.big.title': 'Scena 3D — «{name}»',
+  'scene.mini.tip': 'Trascina: orbita · rotella: zoom · tasto destro: sposta',
 
   'source.section3d': 'Sezione 3D',
   'source.photo': 'Schizzo',
@@ -263,6 +313,12 @@ export const it = {
   'tunnel.tool.rake': 'Rastrello',
   'tunnel.tool.rake.tip': 'Trascina una linea: le linee di flusso partono da lì. Clic destro: torna al rastrello a monte.',
 
+  'tunnel.zoom.in': 'Ingrandisci la vista (+)',
+  'tunnel.zoom.out': 'Riduci la vista (−)',
+  'tunnel.zoom.fit': 'Vista intera della camera (0, o doppio clic sul fluido)',
+  'tunnel.zoom.fitShort': 'Intera',
+  'tunnel.zoom.level': '{value}×',
+  'tunnel.zoom.tip': 'Rotella: zoom attorno al cursore. Trascina il fluido (o usa il tasto centrale) per spostare la vista. Lo zoom non tocca la simulazione.',
   'tunnel.conditions': 'Condizioni',
   'tunnel.fluid': 'Fluido',
   'tunnel.fluid.aria': 'aria',
@@ -332,6 +388,8 @@ export const it = {
   'tunnel.coef.cm': 'Cm',
   'tunnel.coef.clcd': 'Cl/Cd',
   'tunnel.coef.st': 'St',
+  'tunnel.coef.cd.tip': 'Coefficiente di resistenza: forza lungo il vento su ½ ρ V² · L_ref.',
+  'tunnel.coef.cl.tip': 'Coefficiente di portanza: forza perpendicolare al vento, positiva verso l’alto, su ½ ρ V² · L_ref.',
   'tunnel.coef.st.tip': 'Numero di Strouhal f·L/V della frequenza di distacco dei vortici (in unità simulate).',
   'tunnel.coef.cm.tip': 'Momento di beccheggio, positivo a cabrare, attorno a {point}.',
   'tunnel.coef.cp.tip': 'Coefficiente di pressione: (p − p∞) / (½ ρ V²).',
@@ -665,6 +723,11 @@ export const it = {
 } as const
 
 export type MessageKey = keyof typeof it
+
+/** Whether the dictionary has `key` (for optional parts, such as a guide entry's formula). */
+export function has(key: string): key is MessageKey {
+  return key in it
+}
 
 /**
  * The string for `key`, with `{name}` placeholders filled from `vars`. When

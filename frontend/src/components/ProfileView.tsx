@@ -71,14 +71,14 @@ export function ProfileView({ loops, open = [], ghost = [], markers = [], box, c
         preserveAspectRatio="xMidYMid meet"
       >
         <g transform="scale(1,-1)">
-          {grid ? <path d={lines.join('')} stroke="#2a2a2a" strokeWidth={stroke * 0.6} fill="none" /> : null}
+          {grid ? <path d={lines.join('')} className="stroke-ink-700" strokeWidth={stroke * 0.6} fill="none" /> : null}
           {ghost.length ? (
-            <path d={pathOf(ghost)} stroke="#c99a4a" strokeWidth={stroke} strokeDasharray={`${stroke * 4} ${stroke * 3}`} fill="none" />
+            <path d={pathOf(ghost)} className="stroke-warn" strokeWidth={stroke} strokeDasharray={`${stroke * 4} ${stroke * 3}`} fill="none" />
           ) : null}
-          <path d={pathOf(loops)} fill="#c9ced8" fillOpacity={0.85} fillRule="evenodd" stroke="#e8ecf4" strokeWidth={stroke} />
-          {open.length ? <path d={openPath(open)} stroke="#e06c6c" strokeWidth={stroke * 2.5} fill="none" /> : null}
+          <path d={pathOf(loops)} className="fill-body stroke-body-line" fillOpacity={0.85} fillRule="evenodd" strokeWidth={stroke} />
+          {open.length ? <path d={openPath(open)} className="stroke-danger" strokeWidth={stroke * 2.5} fill="none" /> : null}
           {markers.map(([x, y], i) => (
-            <circle key={i} cx={x} cy={y} r={stroke * 6} fill="none" stroke="#e06c6c" strokeWidth={stroke * 1.5} />
+            <circle key={i} cx={x} cy={y} r={stroke * 6} fill="none" className="stroke-danger" strokeWidth={stroke * 1.5} />
           ))}
         </g>
       </svg>

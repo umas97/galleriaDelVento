@@ -17,25 +17,30 @@ import { ReportPage } from './pages/ReportPage'
 import { SketchWizardPage } from './pages/SketchWizard'
 import { StudyPage } from './pages/StudyPage'
 import { TunnelPage } from './pages/Tunnel'
+import { SettingsPage } from './pages/SettingsPage'
+import { GuideProvider } from './guide/Guide'
 
 export function App() {
   return (
     <ImportProvider>
-      <AppShell>
-        <Routes>
-          <Route path="/" element={<LibraryPage />} />
-          <Route path="/modelli/:id" element={<ModelSetupPage />} />
-          <Route path="/modelli/:id/sezioni" element={<SectionPage />} />
-          <Route path="/profili/nuovo" element={<ProfileEditorPage />} />
-          <Route path="/profili/:id" element={<ProfileEditorPage />} />
-          <Route path="/schizzi/:id" element={<SketchWizardPage />} />
-          <Route path="/galleria/:kind/:id" element={<TunnelPage />} />
-          <Route path="/studi/:id" element={<StudyPage />} />
-          <Route path="/confronto" element={<ComparePage />} />
-          <Route path="/report/:id" element={<ReportPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </AppShell>
+      <GuideProvider>
+        <AppShell>
+          <Routes>
+            <Route path="/" element={<LibraryPage />} />
+            <Route path="/modelli/:id" element={<ModelSetupPage />} />
+            <Route path="/modelli/:id/sezioni" element={<SectionPage />} />
+            <Route path="/profili/nuovo" element={<ProfileEditorPage />} />
+            <Route path="/profili/:id" element={<ProfileEditorPage />} />
+            <Route path="/schizzi/:id" element={<SketchWizardPage />} />
+            <Route path="/galleria/:kind/:id" element={<TunnelPage />} />
+            <Route path="/studi/:id" element={<StudyPage />} />
+            <Route path="/confronto" element={<ComparePage />} />
+            <Route path="/report/:id" element={<ReportPage />} />
+            <Route path="/impostazioni" element={<SettingsPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </AppShell>
+      </GuideProvider>
     </ImportProvider>
   )
 }

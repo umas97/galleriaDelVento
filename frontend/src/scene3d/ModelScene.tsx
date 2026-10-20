@@ -10,6 +10,7 @@ import { Canvas, useThree } from '@react-three/fiber'
 import { GizmoHelper, GizmoViewport, Grid, OrbitControls } from '@react-three/drei'
 import { ArrowHelper, Box3, BufferGeometry, Color, DoubleSide, Matrix4, Object3D, Vector3 } from 'three'
 import { metres } from '../lib/format'
+import { token, useTheme } from '../lib/theme'
 import type { MeshHeader } from '../lib/meshBinary'
 import { t, type MessageKey } from '../i18n/it'
 
@@ -140,6 +141,12 @@ export function ModelScene({
   const size = stableBox.getSize(new Vector3())
   const cell = gridCell(Math.max(size.x, size.y, size.z))
   const groundZ = floorZ ?? stableBox.min.z
+  const theme = useTheme()
+  const colors = useMemo(
+    () => ({ background: token('ink-950'), cell: token('ink-600'), section: token('ink-400'), label: token('ink-950') }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- read again when the theme changes
+    [theme],
+  )
 
   return (
     <div className="relative h-full w-full">
@@ -149,7 +156,7 @@ export function ModelScene({
         camera={{ fov: 35, position: [-3, -3, 2] }}
         data-testid={testId}
       >
-        <color attach="background" args={['#141414']} />
+        <color attach="background" args={[colors.background]} />
         <ambientLight intensity={0.55} />
         <directionalLight position={[2, -3, 5]} intensity={1.6} />
         <directionalLight position={[-3, 2, 1]} intensity={0.5} />
@@ -163,8 +170,8 @@ export function ModelScene({
           rotation={[Math.PI / 2, 0, 0]}
           cellSize={cell}
           sectionSize={cell * 10}
-          cellColor="#3a3a3a"
-          sectionColor="#5a5a5a"
+          cellColor={colors.cell}
+          sectionColor={colors.section}
           cellThickness={0.6}
           sectionThickness={1}
           fadeDistance={Math.max(size.x, size.y, size.z) * 8 || 10}
@@ -174,7 +181,7 @@ export function ModelScene({
         <CameraRig box={stableBox} view={view} nonce={nonce} />
         <OrbitControls makeDefault enableDamping={false} />
         <GizmoHelper alignment="bottom-left" margin={compact ? [46, 46] : [56, 56]}>
-          <GizmoViewport axisColors={['#e06c6c', '#7fbf7f', '#7aa2f7']} labelColor="#111" />
+          <GizmoViewport axisColors={['#e06c6c', '#7fbf7f', '#7aa2f7']} labelColor={colors.label} />
         </GizmoHelper>
         {onThumbnail ? <Thumbnail ready={Boolean(geometry)} onCapture={onThumbnail} /> : null}
         {children}

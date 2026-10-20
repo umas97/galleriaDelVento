@@ -117,6 +117,11 @@ soggetti**: il backend Python, il JavaScript della pagina e **il processo Chrome
   delle porte non sicure di Chrome: la richiesta fallisce prima di aprire un socket). Resta
   l'«activity reporter» dell'updater, con l'URL scritto nel binario e senza flag: nella finestra
   fallisce sul DNS, e il test 4 accetta quell'unico host (decisione dell'utente).
+  `--host-resolver-rules` e `--gaia-url` sono nell'elenco dei flag «non supportati» di Chrome,
+  che a ogni avvio apriva una barra in cima alla finestra («Stai utilizzando una segnalazione
+  della riga di comando non supportata…»): la lista porta anche `--test-type`, che Chrome
+  controlla prima di mostrarla (lo passa anche chromedriver). Non è un flag di rete; sta nella
+  stessa lista perché il test 4 lo usi e dimostri che non aggiunge traffico (2026-10-20).
 - **Test 4**: l'avvio e una sessione 2D completa devono registrare zero tentativi non-loopback,
   sia dal backend (socket intercettati) sia da Chrome (lanciato con la stessa lista di flag più
   `--proxy-server` verso un proxy di registrazione su loopback e `--proxy-bypass-list=<-loopback>`;
@@ -991,6 +996,19 @@ Spazio avvia/pausa · R ricomincia · `.` passo singolo · 1–6 visualizzazione
 incidenza (Shift ±5°) · PagSu/PagGiù profondità ±1% (Shift ±0,1%) · S istantanea · V registra ·
 Ctrl+Z / Ctrl+Shift+Z nell'editor · Esc chiude dialoghi e pannelli. Elenco visibile con `?`.
 
+**Vista della galleria** (anche con il flusso in corso e durante una serie: lo zoom non tocca la
+simulazione): rotella = zoom attorno al cursore (da 1× a 32×), trascinamento del fluido con
+«Sposta» o con il tasto centrale = sposta la vista, `+`/`−` zoom, `0` o doppio clic sul fluido =
+camera intera. La mini-scena 3D del modello resta navigabile durante una serie (le rotazioni del
+gizmo no) e si ingrandisce sopra la galleria (richiesta dell'utente, 2026-10-20).
+
+**Guida** (richiesta dell'utente, 2026-10-20): un pannello laterale che non ferma la galleria,
+aperto da «Guida» nell'intestazione o con `?` (sulle scorciatoie). Spiega simboli e grandezze
+(con unità), coefficienti con le loro formule, come leggere ogni grafico (storia, Cp con l'asse
+rovesciato, sonde, polari, serie in velocità e in profondità, punti vuoti), visualizzazioni e
+colori, stati, badge e avvisi, e raccoglie tutte le scorciatoie. Un piccolo «?» accanto a ogni
+coefficiente e grafico apre la voce relativa. Non è una modalità lezione: è una legenda.
+
 ### 12.3 Requisiti della finestra applicativa
 
 - La navigazione vive tutta dentro l'app: ogni schermata ha un percorso di ritorno visibile.
@@ -1000,7 +1018,8 @@ Ctrl+Z / Ctrl+Shift+Z nell'editor · Esc chiude dialoghi e pannelli. Elenco visi
   con «Riprendi», che ricrea il contesto e riparte dal profilo e dal caso correnti.
 - Utilizzabile da **1280×800** in su; i pannelli laterali si richiudono sotto i 1440 px.
 - Tooltip brevi (≤ 2 righe) sulle grandezze fisiche: Re, Mach, τ, bloccaggio, Cp, Strouhal,
-  similitudine parziale, sezione 2D.
+  similitudine parziale, sezione 2D. Stanno in primo piano, sopra pannelli e canvas, dentro la
+  finestra: mai tagliati dal bordo di un pannello laterale (2026-10-20).
 - Tema chiaro e scuro (segue il sistema); le mappe dei colori sono le stesse nei due temi.
 
 ### 12.4 Reattività
@@ -1118,7 +1137,7 @@ STATO.md.
 
 | Misura | Target | Come si misura |
 |---|---|---|
-| Avvio fino a finestra pronta | ≤ 3 s | `tests/bench/bench_startup.py` |
+| Avvio fino a finestra pronta | ≤ 3 s | `tests/bench/bench_startup.py` (finestra vera, fino alla libreria disegnata) |
 | RAM del backend a riposo | ≤ 200 MB (OpenCV e trimesh importati solo quando servono) | RSS del processo server |
 | Galleria Normale (1024×384) | ≥ 300 passi/s **e** ≥ 30 fps | modalità benchmark `?bench=1`: 20 s, media e 5° percentile |
 | Galleria Fine (2048×768) | ≥ 80 passi/s, ≥ 20 fps | idem |
@@ -1312,6 +1331,11 @@ licenza prima di aggiungerla.
 - **Più oggetti indipendenti nella camera** (due auto in scia, ciclista dietro un'auto, edifici
   vicini), ognuno con posizione e incidenza proprie e forze separate. In v1 la camera ospita un
   solo `Profile2D` per caso: più corpi si ottengono già con un profilo multi-anello.
+- **Simulazione 3D di modelli completi** (richiesta dell'utente, 2026-10-20): una galleria che
+  simuli il modello 3D intero, non solo le sue sezioni. Oggi è un non-obiettivo (§1, §4
+  decisione 1): l'utente la vuole **come ultima cosa, solo a programma 2D finito e funzionante**.
+  Va progettata a parte (solutore, risoluzione, visualizzazione, forze, validazione) e scritta
+  qui prima di iniziare; nel frattempo i non-obiettivi restano validi.
 - **Incidenza oltre ±90°** (direzione del vento su 360° per gli edifici in pianta): in v1 resta
   ±90° (decisione dell'utente, 2026-10-15); le altre direzioni si ottengono ruotando il modello.
 

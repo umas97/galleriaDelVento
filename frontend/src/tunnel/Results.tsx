@@ -16,18 +16,17 @@ import type { EngineSnapshot } from '../sim2d/engine'
 import type { Stat } from '../sim2d/series'
 import { t, type MessageKey } from '../i18n/it'
 import { Badge, Panel } from './parts'
+import { GuideLink } from '../guide/Guide'
 
-function Coef({ name, stat, tip, testId }: { name: string; stat: Stat | null; tip?: string; testId: string }) {
-  const label = <span className="text-ink-300">{name}</span>
+function Coef({ name, stat, tip, testId, entry }: { name: string; stat: Stat | null; tip: string; testId: string; entry: string }) {
   return (
     <div className="flex items-baseline justify-between gap-2" data-testid={testId}>
-      {tip ? (
+      <span className="flex items-center gap-1.5">
         <Tip text={tip}>
-          <span className="cursor-help">{label} ⓘ</span>
+          <span className="cursor-help text-ink-300">{name} ⓘ</span>
         </Tip>
-      ) : (
-        label
-      )}
+        <GuideLink section="coefficients" entry={entry} />
+      </span>
       <span className="font-mono text-ink-50">
         {stat ? num(stat.mean, 3) : '—'}
         {stat ? <span className="ml-1 text-xs text-ink-300">± {num(stat.std, 3)}</span> : null}
@@ -54,7 +53,7 @@ export function Results({
   const forces = numbers && s.cd && s.cl
   return (
     <div className="space-y-3 text-sm">
-      <Panel title={t('tunnel.results')} testId="results">
+      <Panel title={t('tunnel.results')} testId="results" guide={{ section: 'status', entry: 'converged' }}>
         <div className="flex flex-wrap items-center gap-1.5">
           <Badge tip={t('tunnel.status.tip')} tone={STATUS_TONE[status]} testId="result-status">
             {t(`tunnel.status.${status}` as MessageKey)}
@@ -62,19 +61,25 @@ export function Results({
           {badges}
         </div>
         <div className="space-y-1">
-          <Coef name={t('tunnel.coef.cd')} stat={numbers ? s.cd : null} testId="coef-cd" />
-          <Coef name={t('tunnel.coef.cl')} stat={numbers ? s.cl : null} testId="coef-cl" />
-          <Coef name={t('tunnel.coef.cm')} stat={numbers ? s.cm : null} tip={t('tunnel.coef.cm.tip', { point })} testId="coef-cm" />
+          <Coef name={t('tunnel.coef.cd')} stat={numbers ? s.cd : null} tip={t('tunnel.coef.cd.tip')} entry="cd" testId="coef-cd" />
+          <Coef name={t('tunnel.coef.cl')} stat={numbers ? s.cl : null} tip={t('tunnel.coef.cl.tip')} entry="cl" testId="coef-cl" />
+          <Coef name={t('tunnel.coef.cm')} stat={numbers ? s.cm : null} tip={t('tunnel.coef.cm.tip', { point })} entry="cm" testId="coef-cm" />
           <div className="flex items-baseline justify-between">
-            <span className="text-ink-300">{t('tunnel.coef.clcd')}</span>
+            <span className="flex items-center gap-1.5">
+              <span className="text-ink-300">{t('tunnel.coef.clcd')}</span>
+              <GuideLink section="coefficients" entry="clcd" />
+            </span>
             <span className="font-mono text-ink-50" data-testid="coef-clcd">
               {numbers && s.clcd !== null ? num(s.clcd, 2) : '—'}
             </span>
           </div>
           <div className="flex items-baseline justify-between">
-            <Tip text={t('tunnel.coef.st.tip')}>
-              <span className="cursor-help text-ink-300">{t('tunnel.coef.st')} ⓘ</span>
-            </Tip>
+            <span className="flex items-center gap-1.5">
+              <Tip text={t('tunnel.coef.st.tip')}>
+                <span className="cursor-help text-ink-300">{t('tunnel.coef.st')} ⓘ</span>
+              </Tip>
+              <GuideLink section="coefficients" entry="st" />
+            </span>
             <span className="font-mono text-ink-50" data-testid="coef-st">
               {numbers && s.strouhal !== null ? num(s.strouhal, 3) : '—'}
             </span>
@@ -85,7 +90,7 @@ export function Results({
         </p>
       </Panel>
 
-      <Panel title={t('tunnel.forces')}>
+      <Panel title={t('tunnel.forces')} guide={{ section: 'coefficients', entry: 'forces' }}>
         <div className="flex justify-between">
           <span className="text-ink-300">{t('tunnel.forces.drag')}</span>
           <span className="font-mono" data-testid="force-drag">
@@ -100,7 +105,7 @@ export function Results({
         </div>
       </Panel>
 
-      <Panel title={t('tunnel.history')}>
+      <Panel title={t('tunnel.history')} guide={{ section: 'charts', entry: 'history' }}>
         {snapshot.chart.length > 1 ? (
           <TimeSeries samples={snapshot.chart} dt={plan.dt} />
         ) : (
@@ -108,7 +113,7 @@ export function Results({
         )}
       </Panel>
 
-      <Panel title={t('tunnel.cp')} tip={t('tunnel.coef.cp.tip')}>
+      <Panel title={t('tunnel.cp')} tip={t('tunnel.coef.cp.tip')} guide={{ section: 'charts', entry: 'cp' }}>
         {snapshot.cp.length > 2 ? (
           <CpCurve points={snapshot.cp} chord={plan.reference_kind === 'chord'} />
         ) : (

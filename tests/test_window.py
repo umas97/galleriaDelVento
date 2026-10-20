@@ -114,6 +114,8 @@ def test_4_the_window_argv_carries_the_offline_flags(tmp_path, xdg_home):
         "--metrics-recording-only",
         "--safebrowsing-disable-auto-update",
         "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1",
+        # Silences the "unsupported command-line flag" bar the two above raise.
+        "--test-type",
     ):
         assert flag in argv
     assert set(CHROME_OFFLINE_FLAGS) <= set(argv)

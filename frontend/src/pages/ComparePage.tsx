@@ -16,12 +16,14 @@ import { FieldImage } from '../components/FieldImage'
 import { api } from '../lib/api'
 import { bodyBox, frameAround, frameWidthFor, parseFields, rangeOf, unionRange, valuesOf, type FieldShown, type MeanFields } from '../lib/fields'
 import { metres, num } from '../lib/format'
+import { useSettings } from '../lib/settings'
 import type { CoefficientKey, Study } from '../lib/types'
 import { parameterLabel, seriesX } from '../study/present'
 import { STATUS_TONE } from '../study/StudyParts'
 import { Legend, digitsFor } from '../tunnel/parts'
 import { t, type MessageKey } from '../i18n/it'
 import { toStudies } from './StudyPage'
+import { GuideLink } from '../guide/Guide'
 
 const COEFFICIENTS: { key: CoefficientKey; label: string }[] = [
   { key: 'cd', label: 'Cd' },
@@ -33,6 +35,7 @@ const COEFFICIENTS: { key: CoefficientKey; label: string }[] = [
 
 export function ComparePage() {
   const [params] = useSearchParams()
+  const { values: settings } = useSettings()
   const ids = (params.get('studi') ?? '').split(',').filter(Boolean).slice(0, 4)
   const studies = useQueries({ queries: ids.map((id) => ({ queryKey: ['study', id], queryFn: () => api.study(id) })) })
   const comparison = useQuery({ queryKey: ['compare', ids.join(',')], queryFn: () => api.compareStudies(ids), enabled: ids.length > 0 })
@@ -63,7 +66,7 @@ export function ComparePage() {
   }, [fields, shown, ids])
 
   if (!ids.length) return <p className="p-6 text-ink-300">{t('compare.none')}</p>
-  const map = shown === 'speed' ? 'viridis' : 'coolwarm'
+  const map = shown === 'speed' ? settings.mappa_sequenziale : settings.mappa_divergente
 
   // Cp of the single studies, x/c when every one has a chord reference.
   const singles = loaded.filter((s) => s.kind === 'single' && s.points.length)
@@ -203,7 +206,7 @@ function CpOverlay({ studies, ids }: { studies: Study[]; ids: string[] }) {
   })
   return (
     <section className="space-y-1">
-      <h3 className="font-semibold text-ink-50">{t('tunnel.cp')}</h3>
+      <h3 className="flex items-center gap-1.5 font-semibold text-ink-50">{t('tunnel.cp')} <GuideLink section="charts" entry="cp" /></h3>
       <XYChart curves={curves} xLabel={chord ? t('tunnel.cp.xc') : t('tunnel.cp.s')} yLabel="Cp" invertY testId="compare-cp" />
       <p className="text-xs text-ink-300">{t('compare.cp.note')}</p>
     </section>

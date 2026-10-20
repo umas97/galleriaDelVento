@@ -14,10 +14,12 @@ import { ProfileView } from '../components/ProfileView'
 import { api } from '../lib/api'
 import { frameAround, frameWidthFor, bodyBox, parseFields, rangeOf, valuesOf, type FieldShown } from '../lib/fields'
 import { num } from '../lib/format'
+import { useSettings } from '../lib/settings'
 import type { SimulationResult, Study } from '../lib/types'
 import { Legend, digitsFor } from '../tunnel/parts'
 import { t, type MessageKey } from '../i18n/it'
 import { conditionRows, parameterLabel, seriesX, warningsOf } from './present'
+import { GuideLink } from '../guide/Guide'
 
 export const STATUS_TONE = { converged: 'text-ok', provisional: 'text-warn', unstable: 'text-danger' } as const
 
@@ -118,11 +120,11 @@ export function PointCharts({
   return (
     <div className={`grid gap-4 ${stacked ? '' : 'md:grid-cols-2'}`}>
       <div>
-        <h4 className="mb-1 text-sm text-ink-200 print:text-neutral-700">{t('tunnel.history')}</h4>
+        <h4 className="mb-1 flex items-center gap-1.5 text-sm text-ink-200 print:text-neutral-700">{t('tunnel.history')} <GuideLink section="charts" entry="history" /></h4>
         {samples.length > 1 ? <TimeSeries samples={samples} dt={result.plan.dt} height={height} /> : <p className="text-xs text-ink-300">{t('study.noHistory')}</p>}
       </div>
       <div>
-        <h4 className="mb-1 text-sm text-ink-200 print:text-neutral-700">{t('tunnel.cp')}</h4>
+        <h4 className="mb-1 flex items-center gap-1.5 text-sm text-ink-200 print:text-neutral-700">{t('tunnel.cp')} <GuideLink section="charts" entry="cp" /></h4>
         {cp.length > 2 ? <CpCurve points={cp} chord={result.contour_cp.chord} height={height} /> : <p className="text-xs text-ink-300">{t('study.noCp')}</p>}
       </div>
     </div>
@@ -131,6 +133,7 @@ export function PointCharts({
 
 export function MeanFields({ studyId, k, result }: { studyId: string; k: number; result: SimulationResult }) {
   const [shown, setShown] = useState<FieldShown>('speed')
+  const { values: settings } = useSettings()
   const query = useQuery({
     queryKey: ['study-fields', studyId, k],
     queryFn: async () => parseFields(await api.studyFields(studyId, k)),
@@ -147,7 +150,7 @@ export function MeanFields({ studyId, k, result }: { studyId: string; k: number;
     return { f, values, range, frame }
   }, [query.data, shown])
   if (!result.fields.length) return <p className="text-xs text-ink-300">{t('study.noFields')}</p>
-  const map = shown === 'speed' ? 'viridis' : 'coolwarm'
+  const map = shown === 'speed' ? settings.mappa_sequenziale : settings.mappa_divergente
   const unit = result.fields.find((r) => r.name === (shown === 'speed' ? 'u' : shown))?.unit ?? ''
   return (
     <div className="space-y-2" data-testid="study-fields">
@@ -210,7 +213,9 @@ export function SeriesCharts({ study, height = 220 }: { study: Study; height?: n
         </div>
       ) : null}
       {parameter === 'depth' ? <p className="text-xs text-warn print:text-neutral-700">{t('series.depth.note')}</p> : null}
-      <p className="text-xs text-ink-300 print:text-neutral-600">{t('series.hollow')}</p>
+      <p className="flex items-center gap-1.5 text-xs text-ink-300 print:text-neutral-600">
+        {t('series.hollow')} <GuideLink section="charts" entry={parameter === 'angle' ? 'polar' : parameter} />
+      </p>
     </div>
   )
 }

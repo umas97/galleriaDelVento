@@ -10,6 +10,7 @@
 // A model's section is cut at half the plan's cell (before the first plan, at
 // 1/128 of the model's length, as on the section screen).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Matrix4 } from 'three'
@@ -18,7 +19,8 @@ import { ErrorNotice } from '../components/ErrorNotice'
 import { NameDialog, SaveError, useProfileSaver } from '../components/SaveProfile'
 import { api } from '../lib/api'
 import { metres, num } from '../lib/format'
-import type { CasePlan, ModelRecord, Profile2D, ProfileDraft, ReferenceKind, StudyTypePreset } from '../lib/types'
+import { useSettings } from '../lib/settings'
+import type { AppSettings, CasePlan, ModelRecord, Profile2D, ProfileDraft, ReferenceKind, StudyTypePreset } from '../lib/types'
 import type { Pt } from '../profile/geometry'
 import { ChamberBox } from '../scene3d/ChamberBox'
 import { CutPlane } from '../scene3d/CutPlane'
@@ -28,7 +30,8 @@ import { useModelGeometry } from '../scene3d/useModelGeometry'
 import { attitudeMatrix, type Plane } from '../section/frame'
 import { useLiveSection } from '../section/useLiveSection'
 import { Panel } from '../tunnel/parts'
-import { TunnelCore, rememberedCase, type CaseState, type TunnelBody } from '../tunnel/TunnelCore'
+import { TunnelCore, type CaseState, type TunnelBody } from '../tunnel/TunnelCore'
+import { rememberedCase } from '../tunnel/lastCase'
 import { t } from '../i18n/it'
 
 export function TunnelPage() {
@@ -47,18 +50,18 @@ function Failure({ error, back }: { error: unknown; back: string }) {
   )
 }
 
-function baseCase(over: Partial<CaseState>): CaseState {
-  const remembered = rememberedCase()
+function baseCase(settings: AppSettings, over: Partial<CaseState>): CaseState {
+  const remembered = rememberedCase(settings)
   return {
-    fluid: remembered.fluid ?? 'aria',
-    temperature_c: remembered.temperature_c ?? 20,
+    fluid: remembered.fluid ?? settings.fluido_predefinito,
+    temperature_c: remembered.temperature_c ?? settings.temperatura_predefinita_c,
     speed: remembered.speed ?? 15,
     angle_deg: 0,
     ground: 'none',
     inlet_profile: 'uniform',
-    resolution: remembered.resolution ?? 'normale',
+    resolution: remembered.resolution ?? settings.risoluzione,
     reference_kind: 'chord',
-    reference_mode: 'fixed',
+    reference_mode: remembered.reference_mode ?? 'fixed',
     max_blockage: 0.05,
     re_sim_scale: 1,
     ...over,
@@ -69,12 +72,13 @@ function baseCase(over: Partial<CaseState>): CaseState {
 
 function ProfileTunnel({ id }: { id: string }) {
   const query = useQuery({ queryKey: ['profile', id], queryFn: () => api.profile(id) })
+  const settings = useSettings()
   if (query.isError) return <Failure error={query.error} back="/" />
-  if (!query.data) return <p className="p-6 text-ink-300">{t('common.loading')}</p>
-  return <ProfileBench profile={query.data.profile} />
+  if (!query.data || !settings.loaded) return <p className="p-6 text-ink-300">{t('common.loading')}</p>
+  return <ProfileBench profile={query.data.profile} settings={settings.values} />
 }
 
-function ProfileBench({ profile }: { profile: Profile2D }) {
+function ProfileBench({ profile, settings }: { profile: Profile2D; settings: AppSettings }) {
   const body = useMemo<TunnelBody>(() => {
     const draft: ProfileDraft = { name: profile.name, loops: profile.loops, source: profile.source, spline: null }
     return {
@@ -93,7 +97,8 @@ function ProfileBench({ profile }: { profile: Profile2D }) {
       model: profile.source.kind === 'section3d' ? { id: profile.source.model_id, name: profile.source.model_name } : null,
     }
   }, [profile])
-  const initial = useMemo(() => baseCase({ speed: rememberedCase().speed ?? 15 }), [])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- once per opening
+  const initial = useMemo(() => baseCase(settings, {}), [])
   return <TunnelCore body={body} initial={initial} back={{ to: `/profili/${profile.id}`, label: t('tunnel.back.profile') }} />
 }
 
@@ -102,16 +107,17 @@ function ProfileBench({ profile }: { profile: Profile2D }) {
 function ModelTunnel({ id }: { id: string }) {
   const model = useQuery({ queryKey: ['model', id], queryFn: () => api.model(id) })
   const types = useQuery({ queryKey: ['study-types'], queryFn: api.studyTypes, staleTime: Infinity })
+  const settings = useSettings()
   if (model.isError || types.isError) return <Failure error={model.error ?? types.error} back="/" />
-  if (!model.data || !types.data) return <p className="p-6 text-ink-300">{t('common.loading')}</p>
+  if (!model.data || !types.data || !settings.loaded) return <p className="p-6 text-ink-300">{t('common.loading')}</p>
   const preset = types.data.find((p) => p.id === model.data.study_type) ?? types.data[0]
-  return <ModelBench model={model.data} preset={preset} />
+  return <ModelBench model={model.data} preset={preset} settings={settings.values} />
 }
 
 const SAVE_DETAIL = 8
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
-function ModelBench({ model, preset }: { model: ModelRecord; preset: StudyTypePreset }) {
+function ModelBench({ model, preset, settings }: { model: ModelRecord; preset: StudyTypePreset; settings: AppSettings }) {
   const navigate = useNavigate()
   const view = useModelGeometry(model)
   const [plane, setPlane] = useState<Plane>(preset.plane)
@@ -124,6 +130,7 @@ function ModelBench({ model, preset }: { model: ModelRecord; preset: StudyTypePr
   const onPlacement = useCallback((position: Pt, angle: number) => setPlacement({ position, angle }), [])
   const [depthKey, setDepthKey] = useState(0)
   const [mini, setMini] = useState(true)
+  const [big, setBig] = useState(false)
   const [naming, setNaming] = useState(false)
   const [saved, setSaved] = useState<{ id: string; name: string } | null>(null)
   const saver = useProfileSaver()
@@ -178,7 +185,7 @@ function ModelBench({ model, preset }: { model: ModelRecord; preset: StudyTypePr
   const referenceKind: ReferenceKind = preset.reference_length === 'height' ? 'height' : preset.reference_length
   const initial = useMemo(
     () =>
-      baseCase({
+      baseCase(settings, {
         speed: preset.speed_ms,
         ground: preset.ground,
         inlet_profile: preset.inlet_profile,
@@ -400,37 +407,66 @@ function ModelBench({ model, preset }: { model: ModelRecord; preset: StudyTypePr
       ) : null}
       {live.loadError ? <ErrorNotice error={live.loadError} /> : null}
       {live.workerError ? <ErrorNotice error={new Error(live.workerError)} /> : null}
-      {mini && view.data && envelope ? (
-        <div className="h-48 overflow-hidden rounded border border-ink-600 bg-ink-950">
-          <ModelScene geometry={view.data.geometry} header={view.data.header} floorZ={model.placement.floor.enabled ? 0 : null} modelMatrix={modelMatrix} compact testId="tunnel-scene">
-            <CutPlane plane={plane} depth={live.depth} envelope={envelope} loops={result?.loops ?? []} open={result?.open ?? []} />
-            {plan && placement && info ? (
-              <ChamberBox plan={plan} plane={plane} position={placement.position} angleDeg={placement.angle} depthMin={info.depthMin} depthMax={info.depthMax} />
-            ) : null}
-            <RotateGizmo
-              plane={plane}
-              roll={roll}
-              tilt={tilt}
-              centre={view.data.header.bbox_min.map((v, i) => (v + view.data!.header.bbox_max[i]) / 2) as [number, number, number]}
-              size={0.6}
-              onStart={live.drag}
-              onChange={(r, tl) => {
-                setRoll(r)
-                setTilt(tl)
-              }}
-              onEnd={release}
-            />
-          </ModelScene>
-        </div>
-      ) : null}
       {naming ? <NameDialog title={t('section.save')} initial={defaultName} onCancel={() => setNaming(false)} onConfirm={(n) => void save(n)} /> : null}
       {saver.element}
     </Panel>
   )
 
+  // Outside the panel that a series locks: looking at the model changes nothing of the case.
+  const sceneView =
+    view.data && envelope ? (
+      <ModelScene geometry={view.data.geometry} header={view.data.header} floorZ={model.placement.floor.enabled ? 0 : null} modelMatrix={modelMatrix} compact={!big} testId="tunnel-scene">
+        <CutPlane plane={plane} depth={live.depth} envelope={envelope} loops={result?.loops ?? []} open={result?.open ?? []} />
+        {plan && placement && info ? (
+          <ChamberBox plan={plan} plane={plane} position={placement.position} angleDeg={placement.angle} depthMin={info.depthMin} depthMax={info.depthMax} />
+        ) : null}
+        <RotateGizmo
+          plane={plane}
+          roll={roll}
+          tilt={tilt}
+          centre={view.data.header.bbox_min.map((v, i) => (v + view.data!.header.bbox_max[i]) / 2) as [number, number, number]}
+          size={0.6}
+          onStart={() => !lockedRef.current && live.drag()}
+          onChange={(r, tl) => {
+            if (lockedRef.current) return
+            setRoll(r)
+            setTilt(tl)
+          }}
+          onEnd={() => !lockedRef.current && release()}
+        />
+      </ModelScene>
+    ) : null
+  const scene = mini && sceneView ? (
+    big ? (
+      createPortal(
+        <div className="fixed right-4 bottom-4 z-800 flex h-[min(70vh,640px)] w-[min(60vw,900px)] flex-col overflow-hidden rounded-lg border border-ink-500 bg-ink-950 shadow-2xl" data-testid="tunnel-scene-big">
+          <div className="flex items-center justify-between border-b border-ink-700 bg-ink-850 px-3 py-1.5 text-sm">
+            <span className="font-semibold text-ink-50">{t('scene.big.title', { name: model.name })}</span>
+            <button className="rounded px-2 py-0.5 text-ink-200 hover:bg-ink-700" onClick={() => setBig(false)} data-testid="scene-shrink">
+              {t('scene.shrink')}
+            </button>
+          </div>
+          <div className="min-h-0 flex-1">{sceneView}</div>
+        </div>,
+        document.body,
+      )
+    ) : (
+      <div className="space-y-1">
+        <div className="h-48 overflow-hidden rounded border border-ink-600 bg-ink-950">{sceneView}</div>
+        <div className="flex items-center justify-between text-xs text-ink-300">
+          <span>{t('scene.mini.tip')}</span>
+          <button className="text-accent hover:underline" onClick={() => setBig(true)} data-testid="scene-enlarge">
+            {t('scene.enlarge')}
+          </button>
+        </div>
+      </div>
+    )
+  ) : null
+
   return (
     <TunnelCore
       body={body}
+      scene={scene}
       initial={initial}
       back={{ to: `/modelli/${model.id}`, label: t('tunnel.back.model') }}
       modelPanel={panel}

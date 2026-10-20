@@ -130,6 +130,13 @@ CHROME_OFFLINE_FLAGS: tuple[str, ...] = (
     # The final barrier: no name resolves except loopback, so anything the
     # flags above missed fails on DNS instead of leaving the machine.
     "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1",
+    # Not a network flag: --host-resolver-rules and --gaia-url are on Chrome's
+    # list of "unsupported" switches, and each launch opened with a bar across
+    # the window ("Stai utilizzando una segnalazione della riga di comando non
+    # supportata..."). --test-type is what Chrome itself checks before showing
+    # that bar (chromedriver passes it for the same reason). It stays in this
+    # list so that test 4 runs Chrome with it and proves it adds no traffic.
+    "--test-type",
 )
 
 TAB_NOTE = (

@@ -225,13 +225,13 @@ export function EditorCanvas({
       data-testid="editor-canvas"
     >
       <svg className="absolute inset-0" width={size.w} height={size.h}>
-        <path d={grid.join('')} stroke="#262626" strokeWidth={1} fill="none" />
-        <path d={`M${ox} 0V${size.h}M0 ${oy}H${size.w}`} stroke="#3a3a3a" strokeWidth={1} fill="none" />
-        <path d={pathOf(screenLoops)} fill="#c9ced8" fillOpacity={0.22} fillRule="evenodd" stroke="none" />
+        <path d={grid.join('')} className="stroke-ink-800" strokeWidth={1} fill="none" />
+        <path d={`M${ox} 0V${size.h}M0 ${oy}H${size.w}`} className="stroke-ink-600" strokeWidth={1} fill="none" />
+        <path d={pathOf(screenLoops)} className="fill-body" fillOpacity={0.22} fillRule="evenodd" stroke="none" />
         {doc.loops.map((loop, li) => {
           const active = selected === li
           if (loop.kind === 'raw')
-            return <path key={li} d={pathOf([screenLoops[li]])} fill="none" stroke={active ? '#b4b4b4' : '#8a8a8a'} strokeWidth={1.5} />
+            return <path key={li} d={pathOf([screenLoops[li]])} fill="none" className={active ? 'stroke-ink-200' : 'stroke-ink-300'} strokeWidth={1.5} />
           const ctrl = loop.points.map(toScreen)
           return (
             <g key={li}>
@@ -243,15 +243,15 @@ export function EditorCanvas({
                   strokeDasharray="6 5"
                 />
               ) : null}
-              <path d={pathOf([ctrl])} fill="none" stroke="#5a5a5a" strokeDasharray="3 4" strokeWidth={1} />
-              <path d={pathOf([screenLoops[li]])} fill="none" stroke={active ? '#f5f5f5' : '#d4d4d4'} strokeWidth={active ? 2 : 1.5} />
+              <path d={pathOf([ctrl])} fill="none" className="stroke-ink-400" strokeDasharray="3 4" strokeWidth={1} />
+              <path d={pathOf([screenLoops[li]])} fill="none" className={active ? 'stroke-ink-50' : 'stroke-ink-100'} strokeWidth={active ? 2 : 1.5} />
               {readOnly
                 ? null
                 : ctrl.map(([x, y], k) =>
                     loop.kind === 'polyline' || loop.corners[k] ? (
-                      <rect key={k} x={x - 4.5} y={y - 4.5} width={9} height={9} fill={active ? '#7aa2f7' : '#4f6aa8'} stroke="#111" />
+                      <rect key={k} x={x - 4.5} y={y - 4.5} width={9} height={9} fill={active ? '#7aa2f7' : '#4f6aa8'} className="stroke-ink-950" />
                     ) : (
-                      <circle key={k} cx={x} cy={y} r={5} fill={active ? '#7aa2f7' : '#4f6aa8'} stroke="#111" />
+                      <circle key={k} cx={x} cy={y} r={5} fill={active ? '#7aa2f7' : '#4f6aa8'} className="stroke-ink-950" />
                     ),
                   )}
             </g>

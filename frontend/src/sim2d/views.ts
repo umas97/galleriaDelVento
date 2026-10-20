@@ -214,7 +214,7 @@ export function defaultRake(nx: number, ny: number, count = 15): Rake {
   return { x: Math.max(2, nx * 0.02), ys, radius: Math.max(1, ny / 150) }
 }
 
-function hex3(hex: string): [number, number, number] {
+export function hex3(hex: string): [number, number, number] {
   const v = parseInt(hex.slice(1), 16)
   return [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255]
 }
