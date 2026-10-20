@@ -222,7 +222,8 @@ grandi (fino a 500 MB) con validazione.
 - **uPlot** — serie temporali, polari, curve Cp.
 - **zustand** — stato locale delle schermate; TanStack Query resta per i dati del server.
 - Solo sviluppo: **vitest**, **playwright-core** con il **Chrome di sistema**
-  (`channel: 'chrome'`, nessun browser scaricato).
+  (`channel: 'chrome'`, nessun browser scaricato); **@webgpu/types** (BSD-3-Clause), i tipi di
+  WebGPU per la galleria 3D (approvato dall'utente il 2026-10-20, da aggiungere con la 7b).
 - **Nessuna stringa visibile nei componenti**: tutte in `frontend/src/i18n/it.ts`, via
   `t('chiave')`.
 
@@ -1472,7 +1473,7 @@ Misure: ≥ 30 fps a Normale con fumo e particelle; voxelizzazione di 1 M triang
 Cp, camera, pavimento, preset); 7c numeri, studi 3D, confronto, VTK, PDF. Revisione dell'utente
 alla fine di ciascuna.
 
-### 24.6 Scelte fatte nella 7a (2026-10-20; da confermare alla revisione della 7a)
+### 24.6 Scelte fatte nella 7a (2026-10-20; confermate dall'utente alla revisione della 7a)
 
 - **Reticolo e collisione** (`gdv/lattice3d.py`): direzioni in coppie opposte (1–2, 3–4, …);
   base dei momenti di d'Humières et al. (2002), righe ortogonali; equilibri dei momenti = momenti
@@ -1484,9 +1485,9 @@ alla fine di ciascuna.
   per M e M⁻¹ sono scritti per esteso dal generatore sulle sole voci non nulle, nello stesso
   ordine del riferimento Numba (scarto misurato 2·10⁻⁷ sulla velocità). Pareti laterali e
   soffitto a scorrimento libero specchiando le componenti che le attraversano. Misura ogni 8
-  passi con una riduzione per workgroup, letta in modo asincrono. Tipi di WebGPU dichiarati a mano
-  in `sim3d/webgpu.d.ts` (TypeScript 5.9 non li ha; un pacchetto di tipi sarebbe una dipendenza
-  nuova, da chiedere).
+  passi con una riduzione per workgroup, letta in modo asincrono. Tipi di WebGPU: nella 7a
+  dichiarati a mano in `sim3d/webgpu.d.ts` (TypeScript 5.9 non li ha); dalla 7b si usa
+  **`@webgpu/types`** (solo sviluppo, BSD-3-Clause), approvato dall'utente il 2026-10-20.
 - **Convenzioni del caso**: il modello ruota attorno al centro del suo ingombro, prima il
   beccheggio attorno a y (positivo a cabrare), poi l'imbardata attorno a z (positiva in senso
   antiorario vista dall'alto). L'interfaccia ruota la mesh e manda al pianificatore l'ingombro del
@@ -1510,4 +1511,5 @@ alla fine di ciascuna.
   L'interfaccia, dopo la voxelizzazione, ripianifica con `reference_area_m2` (stessa griglia).
 - **Validazione della sfera (test 38)**: con la correzione di bloccaggio per continuità
   (Cd_c = Cd·(1 − A/C)²) la camera del pianificatore a Normale dà 2,86 a Re 20 (+9%) e 1,125 a
-  Re 100 (+3%). Se mostrare all'utente il Cd corretto o quello misurato è da decidere nella 7c.
+  Re 100 (+3%). **Nella galleria 3D e nei risultati si mostra il Cd corretto** per il bloccaggio
+  (decisione dell'utente, 2026-10-20), con il bloccaggio tra le condizioni (§2.3).
