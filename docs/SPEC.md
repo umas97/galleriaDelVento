@@ -1326,8 +1326,8 @@ STATO.md.
 - **Fase 6 — Rifinitura**: impostazioni persistenti complete, scorciatoie e `?`, tooltip, tema
   scuro, errori dedicati, perdita del contesto WebGL, misure finali di §17, README.
   *Accettazione*: test 32, 34; tutte le misure di §17 rispettate o discusse.
-- **Fase 7 — Galleria 3D** (§24): 7a solutore e validazione, 7b galleria, 7c numeri e studi, con
-  una revisione dell'utente alla fine di ciascuna. *Accettazione*: test 35–42 (§24.4) e le misure
+- **Fase 7 — Galleria 3D** (§24, chiusa il 2026-10-21): 7a solutore e validazione, 7b galleria,
+  7c numeri e studi, con una revisione dell'utente alla fine di ciascuna. *Accettazione*: test 35–42 (§24.4) e le misure
   di §24.4.
 
 ---
@@ -1396,7 +1396,7 @@ licenza prima di aggiungerla.
 > Stato: **approvata** dall'utente il 2026-10-20 («ti approvo tutte le proposte tecniche, test e
 > ordine dei lavori»); §1 e §4 aggiornati. Le scelte fatte durante la 7a sono in §24.6, quelle
 > della 7b in §24.7 (confermate il 2026-10-21), le decisioni della revisione della 7b in §24.8,
-> le scelte della 7c in §24.9.
+> le scelte della 7c in §24.9 (confermate il 2026-10-21). La Fase 7 è chiusa.
 
 ### 24.1 Obiettivo
 
@@ -1621,7 +1621,7 @@ l'auto 65 × 19 × 17 celle; le parti più sottili di una cella sparivano). Deci
    vuol dire «griglia grossolana».
 4. I preset restano Bozza / Normale / Fine.
 
-### 24.9 Scelte fatte nella 7c (2026-10-21; da confermare alla revisione della 7c)
+### 24.9 Scelte fatte nella 7c (2026-10-21; confermate dall'utente alla revisione della 7c, 2026-10-21)
 
 - **Contratto**: `SimulationResult3D` è la variante 3D del terzo contratto (§5): `dimension:
   "3d"`, `CaseSetup3D`, `CasePlan3D`, `Coefficients3D` (Cd, Cl, Cs corretti, Cd misurato, fattore
