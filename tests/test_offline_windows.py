@@ -43,6 +43,29 @@ BROWSERS = ("msedge.exe", "chrome.exe")
 #: another name, the proxy of the test above records it.
 ABSENT = {"msedge.exe": {"PreconnectToSearchDesktop"}}
 
+#: Edge's own services that no flag of the list stops, accepted by the user on
+#: 2026-10-21 (SPEC §25.4): in the real window they fail on DNS, which
+#: ``test_4_the_dns_barrier_holds_in_the_real_window`` checks at every build.
+#: Accepted by host behind the proxy *and* by URL in the net-log, so a new
+#: service on the same hosts still fails the test.
+EDGE_RESIDUAL_HOSTS = {
+    "CONNECT edge.microsoft.com:443",
+    "CONNECT www.bing.com:443",
+    "CONNECT edge-consumer-static.azureedge.net:443",
+}
+EDGE_RESIDUAL_URLS = (
+    # the list of sites with abusive ads
+    "https://edge.microsoft.com/abusiveadblocking/api/v1/blocklist",
+    # experiments and configuration (Chrome's "variations")
+    "https://edge.microsoft.com/serviceexperimentation/v3/",
+    # mouse gestures
+    "https://edge-consumer-static.azureedge.net/mouse-gesture/config.json",
+    # Shopping: the user's settings and the list of shop domains
+    "https://www.bing.com/api/shopping/v1/user/shoppingsettings",
+    "https://www.bing.com/bloomfilterfiles/ExpandedDomainsFilterGlobal.json",
+)
+RESIDUAL = {"msedge.exe": KNOWN_RESIDUAL | EDGE_RESIDUAL_HOSTS, "chrome.exe": KNOWN_RESIDUAL}
+
 
 def installed(name: str) -> Path | None:
     return next((p for p in winsupport.browser_paths() if p.name == name and p.is_file()), None)
@@ -136,10 +159,14 @@ def test_4_no_network_from_the_window_on_windows(name, no_network, xdg_home, tmp
         server.stop()
     # In the action's log whatever happens: these are what §25.4 decides on.
     print(f"{name}: {proxy.forwarded} richieste dell'app, estranee: {proxy.foreign}")
-    print(f"{name}: URL estranei nel net-log: {foreign_urls(net_log)}")
+    urls = foreign_urls(net_log)
+    print(f"{name}: URL estranei nel net-log: {urls}")
     assert proxy.forwarded > 10, "the app's traffic did not go through the proxy"
-    unexpected = [r for r in proxy.foreign if r not in KNOWN_RESIDUAL]
+    unexpected = [r for r in proxy.foreign if r not in RESIDUAL[name]]
     assert unexpected == [], "\n".join(unexpected)
+    allowed = EDGE_RESIDUAL_URLS if name == "msedge.exe" else ()
+    new = [u for u in urls if not u.startswith(allowed)]
+    assert new == [], "\n".join(new)
     assert no_network == [], no_network
 
 

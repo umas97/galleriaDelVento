@@ -1854,3 +1854,17 @@ conosce. Proposta:
 - **Azione**: Node 24, `npm ci` e build dell'interfaccia, `uv sync --group windows-build`,
   controllo che tag, `pyproject.toml` e `gdv.__version__` coincidano, pytest senza `slow` e
   `gpu`, PyInstaller, prova, zip con SHA-256 tra gli artefatti; con un tag, Release con `gh`.
+- **Rete di Edge, decisione dell'utente (2026-10-21, §25.4: «accettarli così»).** Nell'azione,
+  Chrome 155 su Windows non fa nessuna richiesta estranea. Edge 154 ne tenta cinque, verso
+  servizi suoi che nessun flag della lista spegne (dal net-log):
+  `edge.microsoft.com/abusiveadblocking/api/v1/blocklist` (siti con pubblicità abusive),
+  `edge.microsoft.com/serviceexperimentation/v3/` (esperimenti, come le «variations» di Chrome),
+  `edge-consumer-static.azureedge.net/mouse-gesture/config.json` (gesti del mouse),
+  `www.bing.com/api/shopping/v1/user/shoppingsettings` e
+  `www.bing.com/bloomfilterfiles/ExpandedDomainsFilterGlobal.json` (Shopping). Sono **residui
+  accettati**, come l'«activity reporter» di Chrome: nella finestra vera falliscono sul DNS
+  (`--host-resolver-rules`). Lo verifica a ogni build `test_4_the_dns_barrier_holds_in_the_real_window`:
+  la finestra con l'argv vero, senza proxy, per 90 s, e nessuna connessione TCP non loopback dei
+  processi del browser (nessuna, né con Edge né con Chrome, nella corsa del 2026-10-21). Il test
+  dietro il proxy li accetta per host e per URL: un servizio nuovo, anche sugli stessi host, lo
+  fa fallire. Edge non conosce `PreconnectToSearchDesktop` (dichiarato nel test dei nomi).
