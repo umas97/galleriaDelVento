@@ -185,7 +185,7 @@ def test_derived_files_are_regenerated(api):
 def test_a_model_from_a_newer_version_is_read_but_never_written(api):
     model = api.import_model(stl_binary(CUBE_VERTICES, CUBE_FACES))[1]["model"]
     record = model_dir(model["id"]) / "modello.json"
-    payload = json.loads(record.read_text())
+    payload = json.loads(record.read_text(encoding="utf-8"))
     payload["schema_version"] = 99
     record.write_text(json.dumps(payload))
     before = record.read_bytes()

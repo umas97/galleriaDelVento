@@ -45,7 +45,10 @@ def test_import_keeps_the_photo_as_it_arrived(api, photo):
     assert info["format"] == "jpg" and info["file_name"] == "ala.jpg"
     folder = get_settings().data_dir / "foto"
     assert (folder / f"{info['id']}.jpg").read_bytes() == photo
-    assert json.loads((folder / f"{info['id']}.json").read_text())["sha256"] == info["sha256"]
+    assert (
+        json.loads((folder / f"{info['id']}.json").read_text(encoding="utf-8"))["sha256"]
+        == info["sha256"]
+    )
     # The same bytes again: the same copy, under its first name.
     again = api.json("POST", "/api/sketches/import?nome=altro.jpg", body=photo)[1]
     assert again == info

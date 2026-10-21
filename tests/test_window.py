@@ -45,6 +45,9 @@ def test_a_browser_that_is_not_there_is_not_invented(tmp_path):
     assert find_browser(candidates=(), flatpaks=()) is None
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="snap, Flatpak e WM_CLASS esistono solo su Linux"
+)
 def test_the_identity_is_ours_and_not_any_local_app(tmp_path):
     expected = f"chrome-127.0.0.1__{APP_ID}-Default"
     assert window_class(["/usr/bin/google-chrome"]) == expected
@@ -67,7 +70,7 @@ def test_the_window_is_a_chromium_in_application_mode(tmp_path, xdg_home):
             if (tmp_path / "argv").exists():
                 break
             time.sleep(0.02)
-        argv = (tmp_path / "argv").read_text().split("\n")
+        argv = (tmp_path / "argv").read_text(encoding="utf-8").split("\n")
         assert f"--app=http://127.0.0.1:8123/{APP_ID}" in argv
         assert any(a.startswith("--user-data-dir=") and "window-profile" in a for a in argv)
         assert any(a.startswith("--class=") for a in argv)

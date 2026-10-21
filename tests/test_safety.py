@@ -68,10 +68,10 @@ def test_a_root_folder_cannot_be_deleted():
 def test_empty_dir_removes_links_without_following_them(xdg_home):
     outside = xdg_home.parent / "keep"
     outside.mkdir()
-    (outside / "precious.txt").write_text("x")
+    (outside / "precious.txt").write_text("x", encoding="utf-8")
     tmp = get_settings().tmp_dir
     safety.make_dirs(tmp / "nested")
-    (tmp / "nested" / "f").write_text("x")
+    (tmp / "nested" / "f").write_text("x", encoding="utf-8")
     os.symlink(outside, tmp / "link")
     safety.empty_dir(tmp)
     assert list(tmp.iterdir()) == []

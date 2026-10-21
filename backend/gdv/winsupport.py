@@ -128,11 +128,16 @@ def _registered(executable: str) -> list[Path]:
 
 
 def browser_paths(environ: dict[str, str] | None = None) -> list[Path]:
-    """Where Chrome and Edge may be, best first. ``environ`` exists for the tests."""
+    """Where Chrome and Edge may be, best first.
+
+    ``environ`` exists for the tests; with it the registry is not read, so that
+    only the folders it names count.
+    """
+    registry = WINDOWS and environ is None
     environ = os.environ if environ is None else environ
     paths: list[Path] = []
     for executable in _EXECUTABLES:
-        if WINDOWS:
+        if registry:
             paths.extend(_registered(executable))
         for variable, parts in _INSTALL_PATHS:
             base = environ.get(variable)

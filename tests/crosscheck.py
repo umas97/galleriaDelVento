@@ -22,7 +22,9 @@ FRONTEND = Path(__file__).resolve().parents[1] / "frontend"
 
 
 def run_ts(task: str, payload: Any, tmp_path: Path) -> Any:
-    if shutil.which("npx") is None:
+    # The full path: on Windows npx is npx.cmd, which CreateProcess finds only by name.
+    npx = shutil.which("npx")
+    if npx is None:
         pytest.skip("Node non trovato: il confronto con TypeScript non si può fare")
     if not (FRONTEND / "node_modules" / "vitest").is_dir():
         pytest.skip("dipendenze del frontend non installate (cd frontend && npm install)")
@@ -30,7 +32,7 @@ def run_ts(task: str, payload: Any, tmp_path: Path) -> Any:
     source.write_text(json.dumps({"task": task, "payload": payload}), encoding="utf-8")
     env = {**os.environ, "GDV_CROSS_IN": str(source), "GDV_CROSS_OUT": str(result)}
     done = subprocess.run(
-        ["npx", "vitest", "run", "tests/crosscheck.test.ts"],
+        [npx, "vitest", "run", "tests/crosscheck.test.ts"],
         cwd=FRONTEND,
         env=env,
         capture_output=True,

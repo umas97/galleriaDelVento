@@ -78,7 +78,7 @@ def test_27_a_study_saved_and_read_back_is_identical(api):
 def test_27_a_newer_study_is_shown_and_never_written(api):
     study = create(api)
     path = get_settings().data_dir / "studi" / study["id"] / "studio.json"
-    raw = json.loads(path.read_text())
+    raw = json.loads(path.read_text(encoding="utf-8"))
     raw["schema_version"] = 99
     path.write_text(json.dumps(raw))
     before = (path.read_bytes(), path.stat().st_mtime_ns)
@@ -104,7 +104,9 @@ def test_26_an_unstable_case_keeps_no_numbers_and_no_nan(api):
     assert result["status"] == "unstable"
     assert result["coefficients"]["cd"] is None and result["forces_real"]["drag"] is None
     assert result["fields"] == []
-    text = (get_settings().data_dir / "studi" / study["id"] / "studio.json").read_text()
+    text = (get_settings().data_dir / "studi" / study["id"] / "studio.json").read_text(
+        encoding="utf-8"
+    )
     assert "NaN" not in text and "Infinity" not in text
     # NaN never gets in: a history with one is refused.
     body = sd.point()

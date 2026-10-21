@@ -189,7 +189,7 @@ def test_drawing_errors(api):
 def test_a_profile_from_a_newer_version_is_shown_but_not_overwritten(api):
     pid = api.json("POST", "/api/profiles", json_body=draft(naca4()))[1]["id"]
     path = get_settings().data_dir / "profili" / f"{pid}.json"
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     data["schema_version"] = 99
     path.write_text(json.dumps(data))
     before = path.read_bytes()

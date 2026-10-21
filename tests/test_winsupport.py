@@ -106,11 +106,12 @@ def test_a_window_opens_without_a_display_variable(windows, monkeypatch):
 
 
 def test_no_sighup_on_windows(windows, monkeypatch):
-    monkeypatch.setattr(signal, "SIGBREAK", signal.SIGUSR1, raising=False)
+    # Ctrl+Break exists only on Windows; elsewhere any number stands in for it.
+    monkeypatch.setattr(signal, "SIGBREAK", getattr(signal, "SIGBREAK", 21), raising=False)
     installed: list[int] = []
     monkeypatch.setattr(signal, "signal", lambda signum, _handler: installed.append(signum))
     runtime._install_signal_handlers(threading.Event())
-    assert installed == [signal.SIGTERM, signal.SIGINT, signal.SIGUSR1]
+    assert installed == [signal.SIGTERM, signal.SIGINT, signal.SIGBREAK]
 
 
 def test_the_lock_asks_winsupport_whether_a_pid_lives(windows, monkeypatch):

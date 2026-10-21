@@ -75,7 +75,9 @@ def test_35_generated_typescript_matches_python():
         check=False,
     )
     assert done.returncode == 0, done.stderr
-    text = (ROOT / "frontend" / "src" / "sim3d" / "lattice3d.generated.ts").read_text()
+    text = (ROOT / "frontend" / "src" / "sim3d" / "lattice3d.generated.ts").read_text(
+        encoding="utf-8"
+    )
     assert f"export const S_M = {lattice3d.S_M!r}" in text
 
 
