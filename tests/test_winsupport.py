@@ -131,6 +131,85 @@ def test_the_interface_keeps_its_media_types_over_the_registry(monkeypatch):
     assert mimetypes.guess_type("assets/app.css")[0] == "text/css"
 
 
+class Reserved(OSError):
+    winerror = 10013  # what Windows says of a port it reserves
+
+
+def test_a_port_windows_reserves_is_told_apart(windows, tmp_path, monkeypatch):
+    assert winsupport.is_reserved(Reserved())
+    assert not winsupport.is_reserved(OSError(98, "in uso"))
+    monkeypatch.setattr(single_instance, "_bind_error", lambda port, host="": Reserved())
+    with pytest.raises(single_instance.PortReserved) as caught:
+        single_instance.acquire(8853, path=tmp_path / "app.lock")
+    assert "riservata da Windows" in str(caught.value)
+    # On Linux the same error is the plain "taken" one.
+    monkeypatch.setattr(winsupport, "WINDOWS", False)
+    with pytest.raises(single_instance.PortBusy) as caught:
+        single_instance.acquire(8853, path=tmp_path / "app.lock")
+    assert not isinstance(caught.value, single_instance.PortReserved)
+
+
+def test_the_ports_to_try_start_from_the_remembered_one(xdg_home):
+    state = get_settings().state_dir
+    state.mkdir(parents=True, exist_ok=True)
+    assert winsupport.port_candidates(state, 8853) == [8853, 0]
+    winsupport.remember_port(state, 51234)
+    assert winsupport.port_candidates(state, 8853) == [51234, 8853, 0]
+    winsupport.remember_port(state, 8853)
+    assert winsupport.port_candidates(state, 8853) == [8853, 0]
+    (state / winsupport.PORT_FILE).write_text("niente", encoding="utf-8")
+    assert winsupport.port_candidates(state, 8853) == [8853, 0]
+
+
+def fake_acquire(monkeypatch, refuse):
+    """``acquire`` that refuses some ports, and remembers what it was asked."""
+    asked: list[int] = []
+
+    def acquire(port):
+        asked.append(port)
+        if port in refuse:
+            raise refuse[port](port)
+        return f"lock:{port}"
+
+    monkeypatch.setattr(single_instance, "acquire", acquire)
+    return asked
+
+
+def test_a_reserved_port_moves_to_one_windows_hands_out(windows, xdg_home, monkeypatch):
+    asked = fake_acquire(monkeypatch, {8853: single_instance.PortReserved})
+    assert runtime.take_lock(get_settings(), 8853, chosen=False) == "lock:0"
+    assert asked == [8853, 0]
+
+
+def test_a_remembered_port_now_taken_moves_on_too(windows, xdg_home, monkeypatch):
+    state = get_settings().state_dir
+    state.mkdir(parents=True, exist_ok=True)
+    winsupport.remember_port(state, 51234)
+    asked = fake_acquire(monkeypatch, {51234: single_instance.PortBusy})
+    assert runtime.take_lock(get_settings(), 8853, chosen=False) == "lock:8853"
+    assert asked == [51234, 8853]
+
+
+def test_the_fixed_port_taken_by_another_program_stays_an_error(windows, xdg_home, monkeypatch):
+    fake_acquire(monkeypatch, {8853: single_instance.PortBusy})
+    with pytest.raises(single_instance.PortBusy):
+        runtime.take_lock(get_settings(), 8853, chosen=False)
+
+
+def test_a_port_the_user_chose_never_moves(windows, xdg_home, monkeypatch):
+    asked = fake_acquire(monkeypatch, {8854: single_instance.PortReserved})
+    with pytest.raises(single_instance.PortReserved):
+        runtime.take_lock(get_settings(), 8854, chosen=True)
+    assert asked == [8854]
+
+
+def test_on_linux_the_port_never_moves(xdg_home, monkeypatch):
+    asked = fake_acquire(monkeypatch, {8853: single_instance.PortBusy})
+    with pytest.raises(single_instance.PortBusy):
+        runtime.take_lock(get_settings(), 8853, chosen=False)
+    assert asked == [8853]
+
+
 def test_no_pid_no_window_to_raise():
     assert winsupport.raise_window(None) is False
 

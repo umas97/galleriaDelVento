@@ -14,6 +14,10 @@ Linux none of this runs and nothing there changes:
 * whether a PID is alive: ``os.kill(pid, 0)`` does not ask that on Windows --
   0 is ``CTRL_C_EVENT``, so it would send a Ctrl+C (``single_instance.py``);
 * the stop signals: there is no ``SIGHUP`` (``runtime.py``);
+* the port: Hyper-V and WSL reserve blocks of 100 ports at boot, wherever the
+  dynamic range starts -- on a school PC from 1036 up, 8853 included. The
+  program then takes a port Windows hands out, which is never reserved, and
+  remembers it, so that the window's origin stays the same (``runtime.py``);
 * the interface's media types: Python reads them from the registry, where
   programs often leave ``.js`` as ``text/plain`` -- and Chrome refuses a module
   script served as text, so the window would stay blank (``server.py``).
@@ -37,6 +41,9 @@ __all__ = [
     "WINDOWS",
     "WINDOW_HIDDEN",
     "allow_foreground",
+    "is_reserved",
+    "port_candidates",
+    "remember_port",
     "browser_paths",
     "find_browser",
     "fix_media_types",
@@ -86,6 +93,11 @@ MEDIA_TYPES = {
     ".wasm": "application/wasm",
 }
 
+#: The bind error of a port Windows reserves (WSAEACCES).
+_WSAEACCES = 10013
+#: Where the port the program last took is kept, in the state folder.
+PORT_FILE = "porta"
+
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _STILL_ACTIVE = 259
 _ERROR_ACCESS_DENIED = 5
@@ -103,6 +115,34 @@ def fix_media_types() -> None:
     """Serve the interface with its real types, over the registry's."""
     for extension, media_type in MEDIA_TYPES.items():
         mimetypes.add_type(media_type, extension)
+
+
+def is_reserved(error: OSError) -> bool:
+    """Is this bind error Windows forbidding the port, not someone using it?"""
+    return getattr(error, "winerror", None) == _WSAEACCES
+
+
+def port_candidates(state_dir: Path, default: int) -> list[int]:
+    """The ports to try, in order: the last one taken, the default, then any.
+
+    0 lets Windows choose; it never hands out a port it reserves.
+    """
+    candidates = []
+    try:
+        remembered = int((state_dir / PORT_FILE).read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        remembered = 0
+    for port in (remembered, default, 0):
+        if 0 < port < 65536 and port not in candidates:
+            candidates.append(port)
+    return [*candidates, 0]
+
+
+def remember_port(state_dir: Path, port: int) -> None:
+    """Keep the port taken, for the next launch."""
+    from . import safety
+
+    safety.atomic_write_bytes(state_dir / PORT_FILE, f"{port}\n".encode())
 
 
 def stop_signals() -> tuple[signal.Signals, ...]:

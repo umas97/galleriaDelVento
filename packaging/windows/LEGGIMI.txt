@@ -79,9 +79,12 @@ SE QUALCOSA NON VA
 
 - Se il programma non parte, compare un messaggio con il motivo e la
   posizione del registro (%LOCALAPPDATA%\galleriadelvento\stato\logs).
-- «La porta 8853 è occupata»: un altro programma la usa. Crea un
-  collegamento a galleriaDelVento.exe e, nelle sue proprietà, aggiungi alla
-  fine di «Destinazione» uno spazio e --port 8854.
+- La porta: il programma usa la 8853. Se Windows la tiene riservata (succede
+  sui PC con Hyper-V o WSL) ne prende da solo un'altra libera e la ricorda per
+  le volte successive: non devi fare niente.
+- «La porta 8853 è occupata da un altro programma»: crea un collegamento a
+  galleriaDelVento.exe e, nelle sue proprietà, aggiungi alla fine di
+  «Destinazione» uno spazio e --port 8854.
 - Il programma non usa internet: non manda dati a nessuno e funziona anche
   senza rete.
 

@@ -33,7 +33,7 @@ import threading
 from typing import Any
 
 from . import safety, single_instance, winsupport
-from .config import APP_ID, APP_NAME, Settings, get_settings
+from .config import APP_ID, APP_NAME, Settings, env, get_settings
 from .controls import AppControls
 from .server import LocalServer
 
@@ -96,20 +96,47 @@ def _install_signal_handlers(stop: threading.Event) -> None:
         signal.signal(signum, handler)
 
 
+def take_lock(settings: Settings, port: int, chosen: bool) -> single_instance.LockFile:
+    """The lock, on the fixed port -- or, on Windows, on one it does not reserve.
+
+    Windows reserves blocks of ports at boot (``winsupport``); unless the user
+    chose the port, the program then moves to the one it took last time, or to
+    any port Windows hands out, and remembers it (SPEC §25.8). Elsewhere, and
+    for a port in use by another program, the error stands.
+    """
+    if not winsupport.WINDOWS or chosen:
+        return single_instance.acquire(port)
+    candidates = winsupport.port_candidates(settings.state_dir, port)
+    for candidate in candidates[:-1]:
+        try:
+            return single_instance.acquire(candidate)
+        except single_instance.PortReserved:
+            _log.warning("porta %s riservata da Windows: provo la successiva", candidate)
+        except single_instance.PortBusy:
+            # The remembered port was the program's own pick: another program
+            # may have it now. The fixed one taken by another program stays an error.
+            if candidate == port:
+                raise
+            _log.warning("porta %s occupata da un altro programma: provo la successiva", candidate)
+    return single_instance.acquire(candidates[-1])
+
+
 def run(args: argparse.Namespace) -> int:
     settings = get_settings()
     settings.ensure_dirs()
     configure_logging(settings, args.log_level)
     port = args.port if args.port is not None else settings.port
+    chosen = args.port is not None or env("PORT") is not None
     with_window = want_window(args)
 
     from .window import WindowHost
 
     try:
-        lock = single_instance.acquire(port)
+        lock = take_lock(settings, port, chosen)
     except single_instance.AlreadyRunning as exc:
         return _hand_over(exc.info, with_window)
     except single_instance.PortBusy as exc:
+        _log.error("%s", exc)
         print(f"errore: {exc}", file=sys.stderr)
         return 2
 
@@ -143,10 +170,13 @@ def run(args: argparse.Namespace) -> int:
     try:
         bound = server.start()
     except OSError as exc:
+        _log.error("impossibile avviare il server: %s", exc)
         print(f"errore: impossibile avviare il server: {exc}", file=sys.stderr)
         lock.release()
         return 2
     lock.update(port=bound)
+    if winsupport.WINDOWS and not chosen:
+        winsupport.remember_port(settings.state_dir, bound)
     url = f"http://{settings.host}:{bound}/"
     _log.info("server in ascolto su %s", url)
     _install_signal_handlers(stop)

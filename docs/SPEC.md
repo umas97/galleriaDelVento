@@ -1094,6 +1094,9 @@ coefficiente e grafico apre la voce relativa. Non è una modalità lezione: è u
   finiti restano salvati.» I punti completati di una serie si salvano man mano, quindi un crash
   non perde nulla di finito.
 - Upload: limite di 500 MB applicato dal server prima di leggere tutto il corpo.
+- **Su Windows**, se è Windows stesso a riservare la porta (Hyper-V e WSL riservano blocchi di
+  100 porte a ogni avvio), il programma ne prende una che Windows assegna e la ricorda (§25.8,
+  decisione dell'utente del 2026-10-21). Una porta occupata da un altro programma resta un errore.
 - **Su Windows** (§25.3): finestra con Chrome o Edge, cercati nei percorsi d'installazione;
   la finestra si apre sempre (salvo `--no-window`); il secondo avvio la porta in primo piano
   con le API di Windows; gli errori di avvio compaiono in una finestra di messaggio.
@@ -1873,3 +1876,19 @@ conosce. Proposta:
   processi del browser (nessuna, né con Edge né con Chrome, nella corsa del 2026-10-21). Il test
   dietro il proxy li accetta per host e per URL: un servizio nuovo, anche sugli stessi host, lo
   fa fallire. Edge non conosce `PreconnectToSearchDesktop` (dichiarato nel test dei nomi).
+- **Porta riservata da Windows** (2026-10-21, collaudo dell'utente su un PC Windows): l'avvio
+  falliva con «la porta 8853 è occupata da un altro programma», ma nessuno la usava. Windows
+  riservava le porte 8761–8860 (`netsh interface ipv4 show excludedportrange protocol=tcp`:
+  blocchi di 100 di Hyper-V/WSL da 1036 in su, scelti a ogni avvio), e il bind falliva con
+  `WSAEACCES` (10013). Decisione dell'utente («porta libera, ricordata»): su Windows, se la porta
+  non è stata scelta con `--port` o `GDV_PORT`, il programma prova la porta ricordata, poi la
+  8853, poi una porta assegnata da Windows (porta 0: Windows non assegna mai una porta che
+  riserva), e scrive quella presa in `stato\porta`. La porta ricordata occupata da un altro
+  programma fa passare alla successiva; la 8853 occupata da un altro programma, o una porta scelta
+  dall'utente, resta un errore, ora con il messaggio giusto («riservata da Windows» oppure
+  «occupata da un altro programma»). Cambiando porta si perdono solo le preferenze
+  dell'interfaccia in `localStorage` (l'origine cambia); il lock registra la porta vera, quindi
+  il secondo avvio trova sempre il primo. Su Linux non cambia niente. Gli errori di avvio vanno
+  anche nel registro (prima erano solo stampati: il registro non esisteva), anche su Linux. La
+  prova dell'eseguibile, solo nell'azione, riserva la 8853 con `netsh` e controlla che il
+  programma ne prenda un'altra e la ritrovi al secondo avvio.

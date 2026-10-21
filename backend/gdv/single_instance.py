@@ -42,6 +42,7 @@ __all__ = [
     "LockFile",
     "LockInfo",
     "PortBusy",
+    "PortReserved",
     "acquire",
     "ask_to_show",
     "read_lock",
@@ -76,6 +77,22 @@ class PortBusy(RuntimeError):
     def __init__(self, port: int) -> None:
         super().__init__(
             f"la porta {port} è occupata da un altro programma; usa --port per sceglierne un'altra"
+        )
+        self.port = port
+
+
+class PortReserved(PortBusy):
+    """Windows forbids the port: Hyper-V and WSL reserve blocks of 100 at boot.
+
+    Nobody listens on it, so on Windows the program may take another one
+    (``runtime.py``, SPEC §25.8); with ``--port`` it is an error like ``PortBusy``.
+    """
+
+    def __init__(self, port: int) -> None:
+        RuntimeError.__init__(
+            self,
+            f"la porta {port} è riservata da Windows (Hyper-V o WSL); "
+            "usa --port per sceglierne un'altra",
         )
         self.port = port
 
@@ -130,6 +147,11 @@ def server_responds(port: int, *, timeout: float = 1.0) -> bool:
 
 
 def port_is_free(port: int, host: str = "127.0.0.1") -> bool:
+    return _bind_error(port, host) is None
+
+
+def _bind_error(port: int, host: str = "127.0.0.1") -> OSError | None:
+    """Why the port cannot be bound, or ``None`` if it can."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         # On Windows SO_REUSEADDR binds even over a listening socket: the probe
         # would always say "free". Exclusive use is what fails when it is taken.
@@ -137,9 +159,9 @@ def port_is_free(port: int, host: str = "127.0.0.1") -> bool:
         sock.setsockopt(socket.SOL_SOCKET, option, 1)
         try:
             sock.bind((host, port))
-        except OSError:
-            return False
-    return True
+        except OSError as exc:
+            return exc
+    return None
 
 
 @dataclass
@@ -179,6 +201,7 @@ def acquire(port: int, *, path: Path | None = None) -> LockFile:
     Raises:
         AlreadyRunning: an instance of ours is up and answering.
         PortBusy: the fixed port is taken by a process that is not ours.
+        PortReserved: Windows forbids the port (a ``PortBusy`` too).
     """
     target = path or get_settings().lock_path
     existing = read_lock(target)
@@ -188,10 +211,13 @@ def acquire(port: int, *, path: Path | None = None) -> LockFile:
         _log.info("lockfile stantio (pid %s): lo rimuovo", existing.pid)
         target.unlink(missing_ok=True)
 
-    if port and not port_is_free(port):
+    error = _bind_error(port) if port else None
+    if error is not None:
         if server_responds(port):
             # Ours, but the lockfile was deleted under a live server.
             raise AlreadyRunning(LockInfo(pid=0, port=port))
+        if winsupport.WINDOWS and winsupport.is_reserved(error):
+            raise PortReserved(port)
         raise PortBusy(port)
 
     lock = LockFile(target, LockInfo(pid=os.getpid(), port=port, started_at=time.time()))

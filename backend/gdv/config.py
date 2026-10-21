@@ -38,6 +38,7 @@ ENV_PREFIX = "GDV_"
 #: Fixed, because the window's origin includes the port: another port is
 #: another site to the browser, with its own storage and its own PWA install.
 #: If it is taken the program says so and stops; it never wanders to another.
+#: Except on Windows, when Windows itself reserves it (SPEC §25.8): see winsupport.
 DEFAULT_PORT = 8853
 
 #: Where the window opens. The server redirects it to ``/``; the path exists only

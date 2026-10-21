@@ -1,6 +1,6 @@
 [project]
 name = "galleriadelvento"
-version = "0.1.0"
+version = "0.1.1"
 description = "Galleria del vento 2D in tempo reale per sezioni, schizzi e profili"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
