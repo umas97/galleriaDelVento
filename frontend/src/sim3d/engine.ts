@@ -37,6 +37,8 @@ import { MAX_NOZZLES, SAMPLE_COUNT, SMOKE_POINTS, Views3D, type FrameUniforms, t
 import type { DivergingMap, SequentialMap } from '../sim2d/colormaps'
 
 const MEASURE_EVERY = 8
+/** Steps between two samples of the field's time averages (a multiple of MEASURE_EVERY). */
+const AVERAGE_EVERY = 32
 const FRAME_BUDGET_MS = 27
 const MAX_STEPS_PER_FRAME = 64
 const RANGE_EVERY_MS = 400
@@ -157,6 +159,11 @@ export class Engine3D {
   private lastDone = 0
   /** Steps per frame, smoothed (a frame runs its rounding). */
   private spf = 4
+  /**
+   * The fraction of a step carried to the next frame: frames run whole steps,
+   * but on average `spf` of them (rounding 4.4 to 4 would lose a tenth).
+   */
+  private carry = 0
   private fixedSpf: number | null = null
   private frameTimes: number[] = []
   private stepTimes: { t: number; step: number }[] = []
@@ -469,7 +476,14 @@ export class Engine3D {
 
     let steps = 0
     if (solver && !this.unstable) {
-      if (this.running) steps = this.fixedSpf ?? Math.max(1, Math.round(this.spf))
+      if (this.running) {
+        if (this.fixedSpf !== null) steps = this.fixedSpf
+        else {
+          this.carry += this.spf
+          steps = Math.max(1, Math.floor(this.carry))
+          this.carry = Math.max(0, this.carry - steps)
+        }
+      }
       else if (this.pendingSingle > 0) {
         steps = this.pendingSingle
         this.pendingSingle = 0
@@ -482,8 +496,11 @@ export class Engine3D {
         const n = Math.min(left, MEASURE_EVERY - (solver.step % MEASURE_EVERY))
         solver.run(n)
         left -= n
-        // Past the transient the measurement also feeds the time averages of the field.
-        const averaging = this.series !== null && solver.step >= this.series.averagingFrom && !this.unstable
+        // Past the transient every fourth measurement also feeds the time averages of
+        // the field: a sample every 32 steps is plenty (T_c is hundreds of steps), and
+        // summing 24 MB at every measurement made frames stall.
+        const averaging =
+          this.series !== null && solver.step >= this.series.averagingFrom && !this.unstable && solver.step % AVERAGE_EVERY === 0
         if (solver.step % MEASURE_EVERY === 0) solver.measure(averaging)
       }
       this.stepTimes.push({ t: now, step: solver.step })
@@ -664,7 +681,7 @@ export class Engine3D {
       running: this.running,
       stepsPerSecond: this.running ? sps : 0,
       fps: this.frameTimes.length,
-      stepsPerFrame: this.fixedSpf ?? Math.round(this.spf),
+      stepsPerFrame: this.fixedSpf ?? Math.round(this.spf * 10) / 10,
       unstable: this.unstable,
       ramping: p ? this.step < p.ramp_steps : false,
       rhoInf: this.rhoInf,

@@ -12,7 +12,7 @@ import type { CasePlan3D } from '../lib/types'
 import { Q } from './lattice3d.generated'
 import { shaderModule, type Gpu } from './gpu'
 import { PARAMS_SIZE, PARAMS_STRIDE, RECORD_BYTES, WORKGROUP, measureShader, reduceShader, stepShader } from './shaders'
-import { noWalls, type WallLinks } from './voxelize'
+import { NO_WALL, noWalls, type WallLinks } from './voxelize'
 
 export type LatticeParams3D = {
   nx: number
@@ -79,6 +79,13 @@ export function packMask(voxels: Uint8Array): Uint32Array<ArrayBuffer> {
   return out
 }
 
+/** Which cells have a wall record, 32 to a word (the shaders read it before the index). */
+export function wallBitsOf(index: Uint32Array): Uint32Array<ArrayBuffer> {
+  const out = new Uint32Array(Math.ceil(index.length / 32) + 1)
+  for (let i = 0; i < index.length; i++) if (index[i] !== NO_WALL) out[i >>> 5] |= 1 << (i & 31)
+  return out
+}
+
 /**
  * One measurement, lattice units, at the end of step `step`; the forces are
  * relative to the undisturbed pressure ρ∞ / 3 (SPEC §9.5).
@@ -129,11 +136,11 @@ async function compile(device: GPUDevice): Promise<Compiled> {
   const layouts = {
     step: device.createBindGroupLayout({
       label: 'passo',
-      entries: [params(true), storage(1, true), storage(2, false), storage(3, true), storage(4, true), storage(6, true), storage(7, true)],
+      entries: [params(true), storage(1, true), storage(2, false), storage(3, true), storage(4, true), storage(6, true), storage(7, true), storage(9, true)],
     }),
     measure: device.createBindGroupLayout({
       label: 'misura',
-      entries: [params(false), storage(1, true), storage(3, true), storage(5, false), storage(6, true), storage(7, true), storage(8, false)],
+      entries: [params(false), storage(1, true), storage(3, true), storage(5, false), storage(6, true), storage(7, true), storage(8, false), storage(9, true)],
     }),
     reduce: device.createBindGroupLayout({
       label: 'riduzione',
@@ -163,6 +170,7 @@ export class Solver3D {
   private readonly mask: GPUBuffer
   private readonly wallIndex: GPUBuffer
   private readonly wallQ: GPUBuffer
+  private readonly wallBits: GPUBuffer
   private readonly inlet: GPUBuffer
   /** Sums of (δρ, ux, uy, uz) per cell over the samples of the time averages. */
   private readonly sums: GPUBuffer
@@ -209,6 +217,9 @@ export class Solver3D {
     device.queue.writeBuffer(this.wallIndex, 0, walls.index)
     this.wallQ = device.createBuffer({ label: 'pareti q', size: Math.max(16, walls.q.byteLength), usage: storage })
     device.queue.writeBuffer(this.wallQ, 0, walls.q)
+    const bits = wallBitsOf(walls.index)
+    this.wallBits = device.createBuffer({ label: 'pareti, bit', size: bits.byteLength, usage: storage })
+    device.queue.writeBuffer(this.wallBits, 0, bits)
     this.sums = device.createBuffer({ label: 'medie', size: this.cells * 16, usage: storage })
     const shape = inletShape3D(p)
     this.inlet = device.createBuffer({ label: 'ingresso', size: Math.max(16, shape.byteLength), usage: storage })
@@ -244,6 +255,7 @@ export class Solver3D {
           { binding: 4, resource: binding(this.inlet) },
           { binding: 6, resource: binding(this.wallIndex) },
           { binding: 7, resource: binding(this.wallQ) },
+          { binding: 9, resource: binding(this.wallBits) },
         ],
       }),
     ) as [GPUBindGroup, GPUBindGroup]
@@ -264,6 +276,7 @@ export class Solver3D {
           { binding: 6, resource: binding(this.wallIndex) },
           { binding: 7, resource: binding(this.wallQ) },
           { binding: 8, resource: binding(this.sums) },
+          { binding: 9, resource: binding(this.wallBits) },
         ],
       }),
     ) as [GPUBindGroup, GPUBindGroup]
@@ -488,7 +501,7 @@ export class Solver3D {
   }
 
   dispose(): void {
-    for (const b of [...this.pops, this.mask, this.wallIndex, this.wallQ, this.inlet, this.sums, this.params, ...this.partials]) b.destroy()
+    for (const b of [...this.pops, this.mask, this.wallIndex, this.wallQ, this.wallBits, this.inlet, this.sums, this.params, ...this.partials]) b.destroy()
     for (const r of this.readers) r.buffer.destroy()
     this.readers = []
   }

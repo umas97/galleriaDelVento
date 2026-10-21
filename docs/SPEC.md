@@ -1637,8 +1637,10 @@ l'auto 65 × 19 × 17 celle; le parti più sottili di una cella sparivano). Deci
   fattore lo calcola il pianificatore (`blockage_correction` in `CasePlan3D`); il Cd misurato
   nella camera sta nel suggerimento e nello studio. **Niente Cm né Strouhal in 3D**: un momento
   del corpo intero e una frequenza adimensionata con la lunghezza lungo x direbbero poco a scuola.
-- **Campo medio**: (δρ, u_x, u_y, u_z) sommati sulla GPU nello stesso passaggio della misura
-  (ogni 8 passi, dopo il transitorio e di nuovo dopo un cambio della lunghezza di riferimento),
+- **Campo medio**: (δρ, u_x, u_y, u_z) sommati sulla GPU nello stesso passaggio della misura,
+  una misura su quattro (un campione ogni 32 passi: sommare 24 MB a ogni misura faceva
+  inceppare i fotogrammi; misurato il 2026-10-21), dopo il transitorio e di nuovo dopo un cambio
+  della lunghezza di riferimento,
   16 byte per cella (24 MB a Normale). Salvato come `u`, `v`, `w` su V e `cp`, float16, forma
   (nz, ny, nx), più le celle solide; niente vorticità (ParaView la ricava).
 - **Studio 3D**: sempre singolo (la galleria 3D non fa serie). Tre immagini a risoluzione doppia,
@@ -1661,3 +1663,13 @@ l'auto 65 × 19 × 17 celle; le parti più sottili di una cella sparivano). Deci
   `test_studies3d.py` (salvataggio e rilettura, caso instabile, VTK 3D riletto, CSV, JSON,
   confronto, niente serie, studio 2D senza `dimension`); vitest del caricamento 3D e del distacco
   laterale.
+- **Passi per fotogramma frazionari** (2026-10-21, dopo la revisione): ogni fotogramma fa passi
+  interi ma la frazione si porta al successivo, così la media è quella che la GPU regge (4,3 a
+  Normale) invece di arrotondarla (4). Le celle con pareti hanno anche una maschera a bit, letta
+  prima dell'indice.
+- **Misure** (2026-10-21, Iris Xe, alimentatore, «performance», corpo di Ahmed sul nastro, tutte
+  le viste, 1440×900): Bozza 591 passi/s, 37,9 fps (P5 37); **Normale 161 passi/s, 37,9 fps
+  (P5 37)**; Fine 62 passi/s, 38,2 fps (P5 37). Il calo rispetto ai 184 passi/s della 7b non
+  viene dal codice: il codice della 7b con la camera nuova fa 155–160. La camera più stretta
+  (§24.8) mette le stesse 50.000 particelle in un volume più piccolo attorno al corpo e la resa
+  costa di più. Il solutore da solo è invariato (226–243 contro 231–245 passi/s a Normale).

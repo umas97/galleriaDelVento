@@ -50,9 +50,11 @@ export function ReportPage() {
 
 /** The body of a 3D study's report. */
 function Report3D({ study, first, result }: { study: Study; first: StudyPoint; result: SimulationResult3D }) {
+  // The model's thumbnail, if it has one (the setup screen takes it; the model may be gone).
+  const model = useQuery({ queryKey: ['model', study.model_id], queryFn: () => api.model(study.model_id!), enabled: Boolean(study.model_id), retry: false })
   return (
     <>
-      {study.model_id ? (
+      {study.model_id && model.data?.has_thumbnail ? (
         <figure className="w-1/2 space-y-1">
           <img src={api.thumbnailUrl(study.model_id)} alt="" className="h-44 w-full rounded border border-ink-700 object-contain" />
           <figcaption className="text-xs text-ink-300">{t('studyReport.model3d', { name: result.case.name })}</figcaption>

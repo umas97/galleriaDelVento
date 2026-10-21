@@ -14,7 +14,9 @@
 // 32 cells to a word. Its walls (SPEC §24.8): per cell an index into records
 // of five words (NO_WALL: none), each holding one byte per direction k = 1..18
 // -- the link from the cell to its source x − c_k has a wall at q = b / 255
-// (b ≥ 1), or none (b = 0) -- byte k − 1 of the record, four to a word.
+// (b ≥ 1), or none (b = 0) -- byte k − 1 of the record, four to a word. A bit
+// mask like the body's says which cells have a record, so that the others --
+// nearly all -- read 1/32 of a word instead of their index.
 import { C, M, MINV, MIRROR, OPPOSITE, Q, S_E, S_EPS, S_M, S_PI, S_Q, W } from './lattice3d.generated'
 import { wgslFloat } from './gpu'
 import { NO_WALL, WALL_WORDS } from './voxelize'
@@ -65,7 +67,8 @@ fn solid(c: u32) -> bool { return (mask[c >> 5u] & (1u << (c & 31u))) != 0u; }
 /** The cell's wall record in wq0..wq4 (zeros: no wall on any link). */
 const WALL_LOAD = `
   var wq0 = 0u; var wq1 = 0u; var wq2 = 0u; var wq3 = 0u; var wq4 = 0u;
-  let wi = wallIndex[cell];
+  var wi = ${NO_WALL}u;
+  if ((wallBits[cell >> 5u] & (1u << (cell & 31u))) != 0u) { wi = wallIndex[cell]; }
   if (wi != ${NO_WALL}u) {
     let wb0 = ${WALL_WORDS}u * wi;
     wq0 = wallQ[wb0]; wq1 = wallQ[wb0 + 1u]; wq2 = wallQ[wb0 + 2u]; wq3 = wallQ[wb0 + 3u]; wq4 = wallQ[wb0 + 4u];
@@ -211,6 +214,7 @@ export function stepShader(): string {
 @group(0) @binding(4) var<storage, read> inlet: array<f32>;
 @group(0) @binding(6) var<storage, read> wallIndex: array<u32>;
 @group(0) @binding(7) var<storage, read> wallQ: array<u32>;
+@group(0) @binding(9) var<storage, read> wallBits: array<u32>;
 ${TABLES}
 ${SOLID}
 ${feqLines()}
@@ -396,6 +400,7 @@ export function measureShader(): string {
 @group(0) @binding(6) var<storage, read> wallIndex: array<u32>;
 @group(0) @binding(7) var<storage, read> wallQ: array<u32>;
 @group(0) @binding(8) var<storage, read_write> acc: array<vec4<f32>>;
+@group(0) @binding(9) var<storage, read> wallBits: array<u32>;
 ${TABLES}
 ${SOLID}
 ${SHARED}

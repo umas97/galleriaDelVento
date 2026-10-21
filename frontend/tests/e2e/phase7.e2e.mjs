@@ -218,7 +218,8 @@ try {
   // The report page and its PDF.
   await page.goto(`${app.url}report/${studyId}`)
   await page.getByTestId('report').waitFor()
-  await page.waitForFunction(() => document.querySelectorAll('[data-testid="report"] img').length >= 4)
+  // The three pictures (and the model's thumbnail when it has one).
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="report"] figure img[src*="/views/"]').length === 3)
   await page.getByTestId('chart-history').waitFor()
   await shot(page, 'p7-report')
   const pdf = await fetch(`${app.url}api/studies/${studyId}/report.pdf`)
