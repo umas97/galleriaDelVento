@@ -113,23 +113,38 @@ def foreign_urls(net_log: Path) -> list[str]:
     return sorted({u for u in urls if not local.match(u)})
 
 
-def remote_connections(executable: str) -> set[str]:
-    """TCP connections of the browser's processes to anything but loopback."""
-    script = (
-        f"$ids = (Get-Process {Path(executable).stem} -ErrorAction SilentlyContinue).Id; "
-        "Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object { "
-        "$ids -contains $_.OwningProcess -and "
-        "$_.RemoteAddress -notmatch '^(127\\.|::1$|0\\.0\\.0\\.0$|::$)' } | "
-        'ForEach-Object { "$($_.RemoteAddress):$($_.RemotePort)" }'
-    )
-    done = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", script],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
-    return {line.strip() for line in done.stdout.splitlines() if line.strip()}
+#: Remote ends that are not a connection out: loopback, and unconnected sockets.
+LOCAL_ENDS = re.compile(r"^(127\.|\[::1\]:|0\.0\.0\.0:|\[::\]:|\*:)")
+
+
+def _run(argv: list[str]) -> str | None:
+    """A system tool's output, or ``None`` if it does not answer in time."""
+    try:
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=20, check=False)
+    except subprocess.TimeoutExpired:
+        return None
+    return done.stdout
+
+
+def remote_connections(executable: str) -> set[str] | None:
+    """TCP connections of the browser's processes to anything but loopback.
+
+    ``tasklist`` and ``netstat``, not PowerShell's Get-NetTCPConnection: that
+    one hung for over a minute on the runner (2026-10-21). ``None`` when either
+    tool did not answer -- a sample missed, not a connection seen.
+    """
+    tasks = _run(["tasklist", "/FI", f"IMAGENAME eq {executable}", "/FO", "CSV", "/NH"])
+    table = _run(["netstat", "-ano", "-p", "TCP"])
+    if tasks is None or table is None:
+        return None
+    pids = {row.split('","')[1] for row in tasks.splitlines() if row.count('","') >= 1}
+    found = set()
+    for line in table.splitlines():
+        fields = line.split()  # TCP, local, remote, state, PID
+        ours = len(fields) == 5 and fields[0] == "TCP" and fields[4] in pids
+        if ours and not LOCAL_ENDS.match(fields[2]):
+            found.add(fields[2])
+    return found
 
 
 @pytest.mark.browser
@@ -184,18 +199,26 @@ def test_4_the_dns_barrier_holds_in_the_real_window(name, xdg_home):
     server = LocalServer(AppControls(), "127.0.0.1", 0)
     port = server.start()
     seen: set[str] = set()
+    samples = missed = 0
     process = subprocess.Popen(window_argv(browser, port))  # noqa: S603 - argv built here
     try:
         deadline = time.monotonic() + IDLE_S
         while time.monotonic() < deadline:
-            seen |= remote_connections(name)
-            time.sleep(2)
+            found = remote_connections(name)
+            samples += 1
+            if found is None:
+                missed += 1
+            else:
+                seen |= found
+            time.sleep(1)
     finally:
         process.terminate()
         process.wait(30)
         server.stop()
-    print(f"{name}: connessioni non loopback senza proxy: {sorted(seen)}")
+    print(f"{name}: connessioni non loopback senza proxy: {sorted(seen)} ({samples} campioni)")
     assert seen == set(), sorted(seen)
+    # A few slow samples are the runner's; most of them missing is no check at all.
+    assert missed <= samples // 4, f"{missed} campioni su {samples} senza risposta"
 
 
 @pytest.mark.parametrize("name", BROWSERS)
