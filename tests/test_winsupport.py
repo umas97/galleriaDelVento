@@ -277,6 +277,7 @@ def test_a_crash_is_undone_at_the_next_launch(registry):
 
 def test_the_window_asks_for_the_dedicated_gpu_only_on_windows(monkeypatch, xdg_home):
     host = window.WindowHost(sys.executable)
+    monkeypatch.setattr(winsupport, "WINDOWS", False)
     assert not set(winsupport.GPU_FLAGS) & set(host.argv("http://127.0.0.1:8853/"))
     monkeypatch.setattr(winsupport, "WINDOWS", True)
     assert set(winsupport.GPU_FLAGS) <= set(host.argv("http://127.0.0.1:8853/"))
