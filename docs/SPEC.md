@@ -1854,6 +1854,10 @@ conosce. Proposta:
 - **Azione**: Node 24, `npm ci` e build dell'interfaccia, `uv sync --group windows-build`,
   controllo che tag, `pyproject.toml` e `gdv.__version__` coincidano, pytest senza `slow` e
   `gpu`, PyInstaller, prova, zip con SHA-256 tra gli artefatti; con un tag, Release con `gh`.
+- **Note di rilascio** in `docs/release-notes/<versione>.md`, in italiano per studenti e
+  insegnanti: la prima riga è il titolo della Release, il resto la descrizione. Con un tag
+  l'azione si ferma se il file manca (richiesta dell'utente, 2026-10-21: «descrizione e nome
+  significativo»).
 - **Rete di Edge, decisione dell'utente (2026-10-21, §25.4: «accettarli così»).** Nell'azione,
   Chrome 155 su Windows non fa nessuna richiesta estranea. Edge 154 ne tenta cinque, verso
   servizi suoi che nessun flag della lista spegne (dal net-log):

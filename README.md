@@ -52,7 +52,8 @@ The zip is built by [`.github/workflows/windows.yml`](.github/workflows/windows.
 interface, runs the tests that need no GPU, freezes the program with PyInstaller
 (`packaging/windows/galleriadelvento.spec`, a folder rather than a single file), tries the
 executable (`packaging/windows/smoke.py`) and publishes the Release. The tag must match the
-version in `pyproject.toml`. Everything Windows-specific in the code is in
+version in `pyproject.toml`, and `docs/release-notes/<version>.md` must exist: its first line is
+the Release's title, the rest its description (in Italian, for students). Everything Windows-specific in the code is in
 `backend/gdv/winsupport.py`, reached through one `if WINDOWS` per place.
 
 ## Usage

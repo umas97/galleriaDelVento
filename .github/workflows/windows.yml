@@ -51,6 +51,10 @@ jobs:
           if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne "v$version") {
             throw "il tag $env:GITHUB_REF_NAME non corrisponde alla versione $version"
           }
+          # A Release always has its notes: the title on the first line, the rest below.
+          if ($env:GITHUB_REF_TYPE -eq "tag" -and -not (Test-Path "docs/release-notes/$version.md")) {
+            throw "mancano le note di rilascio docs/release-notes/$version.md"
+          }
           "version=$version" >> $env:GITHUB_OUTPUT
 
       # Everything but the GPU and the slow physics (the runner has no GPU) and
@@ -91,8 +95,9 @@ jobs:
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >
-          gh release create $env:GITHUB_REF_NAME
-          "${{ steps.zip.outputs.name }}" "${{ steps.zip.outputs.name }}.sha256"
-          --title "galleriaDelVento ${{ steps.version.outputs.version }}"
-          --notes "Versione per Windows 10/11 a 64 bit: scarica lo zip, estrailo tutto e avvia galleriaDelVento.exe. Istruzioni nel file LEGGIMI.txt dentro lo zip."
+        run: |
+          $lines = Get-Content -Encoding utf8 "docs/release-notes/${{ steps.version.outputs.version }}.md"
+          $lines | Select-Object -Skip 1 | Set-Content -Encoding utf8 release-notes.md
+          gh release create $env:GITHUB_REF_NAME `
+            "${{ steps.zip.outputs.name }}" "${{ steps.zip.outputs.name }}.sha256" `
+            --title $lines[0] --notes-file release-notes.md
