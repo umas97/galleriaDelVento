@@ -154,7 +154,7 @@ def test_36_chamber_size_and_blockage():
     assert ox - 0.05 == pytest.approx(0.15)
     assert oy == pytest.approx(p.width_m / 2)
     assert oz == pytest.approx(p.height_m / 2)
-    # A slender body gets at least half its largest size as margin.
+    # A thin wing gets at least half its largest frontal size (the span) as margin.
     wing = CaseSetup3D(
         model_id="ala", name="ala", pivot=(0, 0, 1), model_size=(0.25, 1.0, 0.03),
         body_box=(-0.125, -0.5, -0.015, 0.125, 0.5, 0.015), frontal_area_m2=0.025,
@@ -162,6 +162,14 @@ def test_36_chamber_size_and_blockage():
     w = plan3d(wing)
     assert w.width_m >= 2.0 - 2 * w.dx
     assert w.blockage < 0.08
+    # A long low body is not given a margin out of its length (SPEC §24.8): a car
+    # 22 cm long, 6.6 cm wide and 5.7 cm tall on the belt fills the 10% it may.
+    slim = plan3d(car(
+        pivot=(0.0, 0.0, 0.0285), model_size=(0.222, 0.066, 0.057),
+        body_box=(-0.111, -0.033, -0.0285, 0.111, 0.033, 0.0285), frontal_area_m2=0.0024,
+    ))  # fmt: skip
+    assert slim.blockage == pytest.approx(0.1, rel=0.03)
+    assert slim.width_m < 0.222
 
 
 def test_36_floor_keeps_the_real_height_and_the_gap():
@@ -198,6 +206,10 @@ def test_36_reference_area_changes_only_the_normalisation():
         voxels.nx, voxels.ny, voxels.nz, voxels.dx, voxels.tau,
     )  # fmt: skip
     assert voxels.a_lat == pytest.approx(2.0 / base.dx**2)
+    # The blockage correction follows the reference area (SPEC §24.6): (1 − A/C)².
+    section = base.width_m * base.height_m
+    assert voxels.blockage_correction == pytest.approx((1 - 2.0 / section) ** 2)
+    assert base.blockage_correction == pytest.approx((1 - 2.2 / section) ** 2)
     assert voxels.force_per_coefficient == pytest.approx(0.5 * base.fluid.density * 900 * 2.0)
 
 

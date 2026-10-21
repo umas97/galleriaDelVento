@@ -15,6 +15,12 @@ the mean fields, normalised so that float16 holds them:
 Solid cells hold zeros (the mask says where they are). The vorticity uses
 central differences, one-sided at the edges of the chamber, with the solid
 cells at rest.
+
+A 3D result (SPEC §24.2 #7) sends, per cell and x fastest, the sums of (δρ,
+u_x, u_y, u_z) -- float32 -- then the voxels (one byte per cell); the number of
+samples comes with the point (the same for every cell: the body does not
+change during a 3D case). They become ``u``, ``v``, ``w`` on V and ``cp``,
+shape (nz, ny, nx); no vorticity (ParaView derives it from the velocity).
 """
 
 from __future__ import annotations
@@ -23,8 +29,20 @@ import numpy as np
 
 from ..errors import AppError
 from ..physics.planner import CasePlan
+from ..physics.planner3d import CasePlan3D
 
-__all__ = ["FIELD_LIMIT", "FieldSet", "decode", "normalise", "raw_size", "scales"]
+__all__ = [
+    "FIELD_LIMIT",
+    "FieldSet",
+    "decode",
+    "decode3d",
+    "normalise",
+    "normalise3d",
+    "raw_size",
+    "raw_size3d",
+    "scales",
+    "scales3d",
+]
 
 #: float16 stops at 65 504: normalised values are clipped well inside it.
 FIELD_LIMIT = 60_000.0
@@ -48,6 +66,52 @@ def decode(blob: bytes, nx: int, ny: int) -> tuple[np.ndarray, np.ndarray]:
     if not np.isfinite(sums).all():
         raise AppError("I campi medi contengono valori non numerici", "NaN o infinito nelle somme")
     return sums, mask
+
+
+def raw_size3d(nx: int, ny: int, nz: int) -> int:
+    return nx * ny * nz * 17
+
+
+def decode3d(blob: bytes, nx: int, ny: int, nz: int) -> tuple[np.ndarray, np.ndarray]:
+    """The sums (nz, ny, nx, 4) float32 and the voxels (nz, ny, nx) uint8 of a 3D upload."""
+    n = nx * ny * nz
+    if len(blob) != raw_size3d(nx, ny, nz):
+        raise AppError(
+            "I campi medi non corrispondono alla griglia del caso",
+            f"{len(blob)} byte invece di {raw_size3d(nx, ny, nz)} per {nx}×{ny}×{nz}",
+        )
+    sums = np.frombuffer(blob, dtype="<f4", count=n * 4).reshape(nz, ny, nx, 4)
+    mask = np.frombuffer(blob, dtype=np.uint8, offset=n * 16).reshape(nz, ny, nx)
+    if not np.isfinite(sums).all():
+        raise AppError("I campi medi contengono valori non numerici", "NaN o infinito nelle somme")
+    return sums, mask
+
+
+def normalise3d(
+    sums: np.ndarray, mask: np.ndarray, samples: int, rho_inf: float, plan: CasePlan3D
+) -> FieldSet:
+    """Mean 3D fields, normalised, float16; plus ``solid`` (uint8)."""
+    fluid = mask == 0
+    mean = sums / np.float32(max(samples, 1))
+    u_lat = plan.u_lat
+    q = 0.5 * rho_inf * u_lat * u_lat
+    rho = 1.0 + mean[..., 0]
+
+    def half(a: np.ndarray) -> np.ndarray:
+        return np.clip(np.where(fluid, a, 0.0), -FIELD_LIMIT, FIELD_LIMIT).astype(np.float16)
+
+    return {
+        "u": half(mean[..., 1] / u_lat),
+        "v": half(mean[..., 2] / u_lat),
+        "w": half(mean[..., 3] / u_lat),
+        "cp": half((rho - rho_inf) / 3.0 / q),
+        "solid": (mask != 0).astype(np.uint8),
+    }
+
+
+def scales3d(plan: CasePlan3D) -> dict[str, tuple[str, float]]:
+    speed = ("m/s", plan.speed)
+    return {"u": speed, "v": speed, "w": speed, "cp": ("", 1.0)}
 
 
 def normalise(sums: np.ndarray, mask: np.ndarray, rho_inf: float, plan: CasePlan) -> FieldSet:

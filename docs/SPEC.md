@@ -1395,7 +1395,8 @@ licenza prima di aggiungerla.
 
 > Stato: **approvata** dall'utente il 2026-10-20 («ti approvo tutte le proposte tecniche, test e
 > ordine dei lavori»); §1 e §4 aggiornati. Le scelte fatte durante la 7a sono in §24.6, quelle
-> della 7b in §24.7.
+> della 7b in §24.7 (confermate il 2026-10-21), le decisioni della revisione della 7b in §24.8,
+> le scelte della 7c in §24.9.
 
 ### 24.1 Obiettivo
 
@@ -1506,7 +1507,8 @@ alla fine di ciascuna.
   corpo ruotato e la sua area frontale (geometria, non fisica).
 - **Camera 3D**: 1,5 L a monte, 3 L a valle; sezione con lo stesso margine ai lati e sopra (e
   sotto senza pavimento) tale che l'area frontale ne blocchi l'8% (10% per i veicoli), ma almeno
-  metà della dimensione più grande del corpo. **Nessuna camera lunga a basso Re** (a differenza
+  metà della dimensione più grande del corpo (dal 2026-10-21: della dimensione frontale più
+  grande, §24.8). **Nessuna camera lunga a basso Re** (a differenza
   del 2D): sulla sfera a Re 20 e 100, portare il monte da 1,5 a 5 D cambia Cd del 2–3%, mentre il
   bloccaggio da 8% a 2,2% lo cambia del 9–14%; allungare la camera costerebbe 3 volte le celle.
 - **Preset misurati sull'Iris Xe** (WebGPU su Vulkan, sfera): Bozza 0,51 M celle 689 passi/s;
@@ -1526,7 +1528,7 @@ alla fine di ciascuna.
   Re 100 (+3%). **Nella galleria 3D e nei risultati si mostra il Cd corretto** per il bloccaggio
   (decisione dell'utente, 2026-10-20), con il bloccaggio tra le condizioni (§2.3).
 
-### 24.7 Scelte fatte nella 7b (2026-10-20; da confermare alla revisione della 7b)
+### 24.7 Scelte fatte nella 7b (2026-10-20; confermate dall'utente alla revisione della 7b, 2026-10-21)
 
 - **Schermata** `/galleria3d/:id` (`pages/Tunnel3D.tsx`), aperta da «Galleria 3D» nella
   preparazione del modello e nel pannello «Modello 3D» della galleria 2D; da lì «Galleria 2D
@@ -1584,3 +1586,78 @@ alla fine di ciascuna.
   piano + Cp in superficie + fumo + particelle, finestra 1440×900): Bozza 0,50 M celle 603 passi/s,
   37 fps; **Normale 1,50 M celle 184 passi/s, 37,6 fps** (P5 37); Fine 3,98 M celle 67 passi/s,
   34,5 fps. Target di §24.4 (≥ 30 fps a Normale con fumo e particelle) rispettato.
+
+### 24.8 Revisione della 7b (2026-10-21): la forma del corpo nel calcolo
+
+Alla revisione l'utente ha confermato tutte le scelte di §24.7 e ha notato che un modello vero
+(un'auto da 22 cm) perde troppo della sua forma. Non era solo la resa: il modello è disegnato
+dalla mesh di vista, liscio, ma il flusso vede un corpo a gradini di celle (a Normale 3,4 mm,
+l'auto 65 × 19 × 17 celle; le parti più sottili di una cella sparivano). Decisioni dell'utente:
+
+1. **Camera più stretta per i corpi slanciati**: il margine minimo attorno al corpo è metà della
+   sua dimensione frontale più grande (larghezza o altezza), non della lunghezza. Prima, per un
+   corpo lungo e basso, il margine dalla lunghezza dominava (l'auto: bloccaggio 4,6% invece del
+   10% ammesso, metà delle celle lontane dal corpo). Sfera e cubo non cambiano.
+2. **Pareti interpolate** (Bouzidi, Firdaouss e Lallemand 2001, interpolazione lineare) al posto
+   del rimbalzo a metà via sul corpo: per ogni collegamento tra una cella fluida e la superficie
+   si conosce la distanza vera della parete, q ∈ (0, 1] in frazioni del collegamento, e la
+   popolazione riflessa la usa: q < ½: f_k̄(x) = 2q f*_k(x) + (1 − 2q) f*_k(x + c_k̄); q ≥ ½:
+   f_k̄(x) = f*_k(x)/(2q) + (1 − 1/(2q)) f*_k̄(x). Sono combinazioni convesse (nessuna
+   amplificazione). Dove x + c_k̄ non è fluido si torna al rimbalzo a metà via; dove una cella
+   solida non ha intersezione sul collegamento (voxel deciso a maggioranza) vale q = ½.
+   - Le q si calcolano nel worker della geometria intersecando i collegamenti con i triangoli
+     della mesh piena; si conservano a 8 bit (q = b/255, b = 0: nessuna parete), 18 per cella
+     di confine, più un indice per cella.
+   - **Parti sottili**: un collegamento tra due celle fluide che attraversa la superficie è una
+     parete per entrambe (con la sua q da ciascun lato): un alettone più sottile di una cella
+     esiste per il flusso anche se nessun centro di cella cade dentro.
+   - **Forze**: scambio di quantità di moto con la popolazione riflessa vera,
+     F = Σ c_k (f*_k(x) + f_k̄(x, t+1)), più la correzione per ρ∞ di §9.5 sugli stessi
+     collegamenti.
+   - Il pavimento e le pareti della camera restano come in §24.3; la galleria 2D resta col
+     rimbalzo a metà via (§22).
+3. **«Mostra i voxel»**: un interruttore della galleria 3D disegna il corpo come lo vede il
+   flusso (le facce esterne delle celle solide) al posto della mesh, per far vedere a scuola cosa
+   vuol dire «griglia grossolana».
+4. I preset restano Bozza / Normale / Fine.
+
+### 24.9 Scelte fatte nella 7c (2026-10-21; da confermare alla revisione della 7c)
+
+- **Contratto**: `SimulationResult3D` è la variante 3D del terzo contratto (§5): `dimension:
+  "3d"`, `CaseSetup3D`, `CasePlan3D`, `Coefficients3D` (Cd, Cl, Cs corretti, Cd misurato, fattore
+  di correzione, regime, variazione, passi mediati, ρ∞), `Forces3D` (resistenza, portanza,
+  laterale in N), storia, campi 3D. Un risultato 2D scrive `dimension: "2d"`; i file scritti
+  prima, senza il campo, si leggono come 2D. `StudyPoint.result` è l'uno o l'altro. Coperti dal
+  test 5.
+- **Numeri** (pannello a destra della galleria 3D): Cd lungo x, Cl verso l'alto (+z), **Cs
+  laterale** (+y), sull'area di riferimento (frontale delle celle), normalizzati con ρ∞, medie e
+  convergenza come §9.5 (il distacco si cerca su Cl o su Cs, quello che oscilla di più). **La
+  correzione di bloccaggio (1 − A/C)² vale per tutti i coefficienti e per le forze** (è una
+  correzione della velocità di riferimento): forze «all'aria libera», ½ ρ V² · A_rif · C. Il
+  fattore lo calcola il pianificatore (`blockage_correction` in `CasePlan3D`); il Cd misurato
+  nella camera sta nel suggerimento e nello studio. **Niente Cm né Strouhal in 3D**: un momento
+  del corpo intero e una frequenza adimensionata con la lunghezza lungo x direbbero poco a scuola.
+- **Campo medio**: (δρ, u_x, u_y, u_z) sommati sulla GPU nello stesso passaggio della misura
+  (ogni 8 passi, dopo il transitorio e di nuovo dopo un cambio della lunghezza di riferimento),
+  16 byte per cella (24 MB a Normale). Salvato come `u`, `v`, `w` su V e `cp`, float16, forma
+  (nz, ny, nx), più le celle solide; niente vorticità (ParaView la ricava).
+- **Studio 3D**: sempre singolo (la galleria 3D non fa serie). Tre immagini a risoluzione doppia,
+  con legenda e condizioni: «vista» (com'era al salvataggio), «piano» (piano longitudinale per il
+  centro del corpo, velocità, vista laterale), «superficie» (Cp sul modello, isometrica); la
+  miniatura viene dal piano. Mentre si salvano, la galleria mostra per un attimo le due viste
+  fisse. Uscire con numeri 3D non salvati chiede conferma come nel 2D (§13).
+- **Pagina dello studio, report, export**: condizioni con rotazioni, area di riferimento e
+  bloccaggio con il fattore; coefficienti e forze in N; avvisi (provvisorio, similitudine
+  parziale, griglia grossolana, bloccaggio); immagini; storia di Cd, Cl, Cs. Export: storia CSV
+  (`passo;tempo_s;Cd;Cl;Cs`, condizioni in testa), campi 3D in VTK `.vti` (velocità vettore,
+  Cp, pressione in Pa, solido), JSON (senza contorno), PDF. Niente contorno, DXF/SVG né
+  `fields.bin` per un risultato 3D.
+- **Confronto**: gli studi 3D si confrontano tra loro (Cd, Cl, Cs; diversi se Re simulato o area
+  di riferimento differiscono oltre il 2%); uno studio 2D accanto a uno 3D è sempre «non
+  confrontabile». Le immagini 3D si affiancano, ognuna con la sua scala (sono immagini salvate,
+  non campi).
+- **Test**: test 41 completo (`phase7.e2e.mjs`: numeri e forze, «Mostra i voxel», studio salvato
+  con tre immagini e campo 3D, pagina dello studio, VTK e CSV, report e PDF, confronto); pytest
+  `test_studies3d.py` (salvataggio e rilettura, caso instabile, VTK 3D riletto, CSV, JSON,
+  confronto, niente serie, studio 2D senza `dimension`); vitest del caricamento 3D e del distacco
+  laterale.

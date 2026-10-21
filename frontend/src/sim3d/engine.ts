@@ -4,16 +4,19 @@
 // The 3D tunnel's engine (SPEC §24): it runs a CasePlan3D on the WebGPU solver
 // and draws it, frame by frame, from the camera the user moves. Like the 2D
 // engine it owns no physics: the plan comes from the backend (SPEC §4, decision
-// 4), the voxels from the geometry thread.
+// 4), the voxels and their walls from the geometry thread.
 //
 // Frames. Each one runs a number of time steps -- measuring every 8, as in 2D
 // -- then turns the populations into the field texture, moves the tracers and
-// draws. The steps per frame follow the GPU: the time from one frame's
+// draws. The measurements become the coefficients of the whole body (SPEC
+// §24.2 #5): on the reference area, normalised with ρ∞, corrected for the
+// blockage as the plan says (SPEC §24.6); averages, convergence and the time
+// averages of the field follow the 2D rules (SPEC §9.5). The steps per frame follow the GPU: the time from one frame's
 // completion to the next is held near FRAME_BUDGET_MS (≥ 30 fps, SPEC §24.4);
 // at most two frames wait on the GPU, so it never idles between them and the
 // page never queues more.
 import type { CasePlan3D } from '../lib/types'
-import { OrbitCamera, type Vec3 } from './camera'
+import { OrbitCamera, type CameraView, type Vec3 } from './camera'
 import { requestGpu, type Gpu } from './gpu'
 import { Solver3D, latticeParams3D, packMask, type Sample3D } from './solver'
 import {
@@ -23,10 +26,13 @@ import {
   rakeNozzles,
   rotationMatrix,
   surfacePoints,
+  voxelSurface,
   type BodyMesh,
   type PlaneAxis,
   type Rake,
 } from './scene'
+import type { WallLinks } from './voxelize'
+import { CoefficientSeries, type CoefSample, type SeriesOptions, type SeriesStats } from '../sim2d/series'
 import { MAX_NOZZLES, SAMPLE_COUNT, SMOKE_POINTS, Views3D, type FrameUniforms, type Target } from './views'
 import type { DivergingMap, SequentialMap } from '../sim2d/colormaps'
 
@@ -37,10 +43,11 @@ const RANGE_EVERY_MS = 400
 /** Particle tails: this many cells at the undisturbed speed. */
 const TAIL_CELLS = 2.5
 
-/** A case ready to run: the plan, and the voxels of the body on its grid. */
+/** A case ready to run: the plan, and the voxels of the body on its grid with their walls. */
 export type Case3D = {
   plan: CasePlan3D
   voxels: Uint8Array
+  walls: WallLinks
   /** Changes when the voxels do (rotations, grid). */
   voxelKey: string
   pivot: Vec3
@@ -51,6 +58,8 @@ export type PlaneOptions = { shown: boolean; axis: PlaneAxis; position: number; 
 export type ViewOptions3D = {
   plane: PlaneOptions
   surfaceCp: boolean
+  /** «Mostra i voxel» (SPEC §24.8): the voxels' faces in place of the model. */
+  voxels: boolean
   smoke: boolean
   particles: boolean
   rake: Rake | null
@@ -76,6 +85,39 @@ export type Snapshot3D = {
   rhoInf: number
   /** Plane: m/s or Cp; surface: Cp; tracers: m/s. */
   ranges: Ranges3D
+  /** Cd, Cl (up, +z) and the side force Cs (+y, in the cm slot), corrected for the blockage. */
+  stats: SeriesStats
+  chart: CoefSample[]
+}
+
+/** Everything a saved 3D result needs from the GPU side (SPEC §24.2 #7). */
+export type Engine3DResult = {
+  step: number
+  unstable: boolean
+  stats: SeriesStats
+  rhoInf: number
+  /** Cd, Cl, Cs (cm slot) per measurement, corrected. */
+  history: CoefSample[]
+  /** Sums of (δρ, ux, uy, uz) per cell, or null before averaging starts. */
+  mean: { sums: Float32Array<ArrayBuffer>; samples: number; rhoInf: number } | null
+  voxels: Uint8Array
+}
+
+/** The 3D series: the side force, in the cm slot, may carry the shedding too. */
+function seriesOptions(p: CasePlan3D): SeriesOptions {
+  return { tcSteps: p.tc_steps, transientSteps: p.transient_steps, lLat: p.l_lat, uLat: p.u_lat, shedding: ['cl', 'cm'] }
+}
+
+const EMPTY_STATS: SeriesStats = {
+  status: 'transient',
+  regime: null,
+  cd: null,
+  cl: null,
+  cm: null,
+  clcd: null,
+  strouhal: null,
+  change: null,
+  averagedSteps: 0,
 }
 
 const unstableSample = (s: Sample3D) => s.nan > 0 || !(s.rhoMin >= 0.7 && s.rhoMax <= 1.3)
@@ -96,8 +138,13 @@ export class Engine3D {
   onFrame: (() => void) | null = null
 
   private solver: Solver3D | null = null
+  private series: CoefficientSeries | null = null
   private current: Case3D | null = null
   private bodyMesh: BodyMesh | null = null
+  /** «Mostra i voxel»: the body as the flow sees it, made once per case. */
+  private voxelMesh: { key: string; mesh: BodyMesh } | null = null
+  /** The mesh the views hold now. */
+  private drawn: BodyMesh | null = null
   private yaw = 0
   private pitch = 0
   private running = false
@@ -136,6 +183,7 @@ export class Engine3D {
   private options: ViewOptions3D = {
     plane: { shown: true, axis: 1, position: 0, field: 'speed' },
     surfaceCp: false,
+    voxels: false,
     smoke: false,
     particles: false,
     rake: null,
@@ -200,18 +248,23 @@ export class Engine3D {
   async setCase(c: Case3D): Promise<void> {
     const before = this.current
     if (before && this.solver && before.voxelKey === c.voxelKey && sameLattice(before.plan, c.plan)) {
+      // New numbers on the same flow (the reference length or area): averages restart.
       this.current = c
+      this.series?.setOptions(seriesOptions(c.plan), this.solver.step)
+      this.solver.clearMean()
       this.refreshGeometry()
       return
     }
-    const solver = await Solver3D.create(this.gpu, latticeParams3D(c.plan), packMask(c.voxels))
+    const solver = await Solver3D.create(this.gpu, latticeParams3D(c.plan), packMask(c.voxels), c.walls)
     if (this.disposed) {
       solver.dispose()
       return
     }
     const old = this.solver
     this.solver = solver
+    this.series = new CoefficientSeries(seriesOptions(c.plan))
     this.current = c
+    this.voxelMesh = null
     this.views.setGrid(c.plan, solver)
     this.nozzleKey = ''
     old?.dispose()
@@ -227,11 +280,28 @@ export class Engine3D {
 
   /** The model's view mesh and the rotations it is drawn with. */
   setBody(body: BodyMesh | null, yaw: number, pitch: number): void {
-    if (body !== this.bodyMesh) this.views.setBody(body)
     this.bodyMesh = body
     this.yaw = yaw
     this.pitch = pitch
     this.refreshGeometry()
+  }
+
+  /**
+   * The voxels when asked for and when they are the drawn rotations' (while a
+   * rotation is dragged the model turns on screen and the voxels wait for the
+   * release); the model otherwise.
+   */
+  private chooseMesh(): void {
+    const c = this.current
+    let mesh = this.bodyMesh
+    if (this.options.voxels && c && c.plan.yaw_deg === this.yaw && c.plan.pitch_deg === this.pitch) {
+      if (this.voxelMesh?.key !== c.voxelKey) this.voxelMesh = { key: c.voxelKey, mesh: voxelSurface(c.voxels, c.plan, c.pivot) }
+      mesh = this.voxelMesh.mesh
+    }
+    if (mesh !== this.drawn) {
+      this.drawn = mesh
+      this.views.setBody(mesh)
+    }
   }
 
   setOptions(options: ViewOptions3D): void {
@@ -239,6 +309,7 @@ export class Engine3D {
     this.options = options
     if (options.sequential !== before.sequential || options.diverging !== before.diverging) this.views.setMaps(options.sequential, options.diverging)
     if (options.rake !== before.rake) this.refreshGeometry()
+    if (options.voxels !== before.voxels) this.chooseMesh()
     if (options.locked) {
       this.planeRange = options.locked.plane
       this.surfaceRange = options.locked.surface
@@ -275,6 +346,7 @@ export class Engine3D {
   /** Back to a fluid at rest. */
   restart(): void {
     this.solver?.restart()
+    this.series?.clear()
     this.unstable = false
     this.rhoInf = 1
     this.stepTimes = []
@@ -293,6 +365,7 @@ export class Engine3D {
 
   /** Chamber edges and rake, model placement, nozzles and sample points: after any change of them. */
   private refreshGeometry(): void {
+    this.chooseMesh()
     const c = this.current
     if (!c) return
     const p = c.plan
@@ -409,7 +482,9 @@ export class Engine3D {
         const n = Math.min(left, MEASURE_EVERY - (solver.step % MEASURE_EVERY))
         solver.run(n)
         left -= n
-        if (solver.step % MEASURE_EVERY === 0) solver.measure()
+        // Past the transient the measurement also feeds the time averages of the field.
+        const averaging = this.series !== null && solver.step >= this.series.averagingFrom && !this.unstable
+        if (solver.step % MEASURE_EVERY === 0) solver.measure(averaging)
       }
       this.stepTimes.push({ t: now, step: solver.step })
     }
@@ -480,6 +555,7 @@ export class Engine3D {
   }
 
   private absorb(samples: Sample3D[]): void {
+    const p = this.current?.plan
     for (const s of samples) {
       if (this.unstable) break
       if (unstableSample(s)) {
@@ -489,26 +565,35 @@ export class Engine3D {
         break
       }
       this.rhoInf = s.rhoInf
+      if (p && this.series) {
+        // On the reference area with the measured ρ∞, then as in open air (SPEC §24.6).
+        const per = p.blockage_correction / (0.5 * s.rhoInf * p.u_lat * p.u_lat * p.a_lat)
+        this.series.add({ step: s.step, cd: s.fx * per, cl: s.fz * per, cm: s.fy * per })
+      }
     }
   }
 
   /** The colour ranges from the plane's fluid cells and from just off the surface (SPEC §10.6). */
   private measureRanges(): void {
+    void this.rangesFor(this.options)
+  }
+
+  /** The ranges of what `o` shows, measured on the GPU; resolves once they are in place. */
+  private rangesFor(o: ViewOptions3D): Promise<void> {
     const c = this.current
-    const o = this.options
-    if (!c || !this.fieldFresh || o.locked || this.step < c.plan.ramp_steps) return
+    if (!c || !this.fieldFresh || o.locked || this.step < c.plan.ramp_steps) return Promise.resolve()
     const plane = o.plane.shown || o.particles ? planePoints(o.plane.axis, o.plane.position, c.plan, c.voxels) : new Float32Array(0)
     const surface = o.surfaceCp ? this.surfaceSamples : new Float32Array(0)
-    if (!plane.length && !surface.length) return
+    if (!plane.length && !surface.length) return Promise.resolve()
     const points = new Float32Array(plane.length + surface.length)
     points.set(plane, 0)
     points.set(surface, plane.length)
     const read = this.views.probe(points)
-    if (!read) return
+    if (!read) return Promise.resolve()
     const p = c.plan
     const split = plane.length / 4
     const field = o.plane.field
-    void read
+    return read
       .then((values) => {
         if (this.current !== c || this.options.locked) return
         const q = 0.5 * this.rhoInf * p.u_lat * p.u_lat
@@ -535,6 +620,39 @@ export class Engine3D {
       .catch(() => undefined)
   }
 
+  /**
+   * A picture for a study (SPEC §24.2 #7): what `change` shows, from `look`
+   * framed on the body's `box` (chamber metres), `scale` times the canvas, with
+   * the ranges that view gets now. The tunnel's own options, camera and ranges
+   * come back afterwards.
+   */
+  async renderStudyView(
+    change: Partial<ViewOptions3D>,
+    look: CameraView,
+    box: readonly number[],
+    scale: number,
+  ): Promise<{ canvas: HTMLCanvasElement; ranges: Ranges3D } | null> {
+    const options = this.options
+    const cam = this.camera
+    const saved = { target: [...cam.target] as Vec3, distance: cam.distance, azimuth: cam.azimuth, elevation: cam.elevation }
+    const ranges = { plane: this.planeRange, surface: this.surfaceRange, speed: this.speedRange }
+    try {
+      this.options = { ...options, ...change, locked: null }
+      this.chooseMesh()
+      this.frameBody(box, look)
+      await this.rangesFor(this.options)
+      const canvas = await this.renderLarge(scale)
+      return canvas ? { canvas, ranges: { plane: this.planeRange, surface: this.surfaceRange, speed: this.speedRange } } : null
+    } finally {
+      this.options = options
+      this.chooseMesh()
+      Object.assign(cam, saved)
+      this.planeRange = ranges.plane
+      this.surfaceRange = ranges.surface
+      this.speedRange = ranges.speed
+    }
+  }
+
   snapshot(): Snapshot3D {
     const first = this.stepTimes[0]
     const last = this.stepTimes[this.stepTimes.length - 1]
@@ -551,6 +669,28 @@ export class Engine3D {
       ramping: p ? this.step < p.ramp_steps : false,
       rhoInf: this.rhoInf,
       ranges: { plane: this.planeRange, surface: this.surfaceRange, speed: this.speedRange },
+      stats: this.series?.stats() ?? EMPTY_STATS,
+      chart: this.series?.chart() ?? [],
+    }
+  }
+
+  /** What a study saves of the current case (SPEC §24.2 #7). */
+  async result(): Promise<Engine3DResult | null> {
+    const solver = this.solver
+    const c = this.current
+    if (!solver || !c || !this.series) return null
+    const samples = solver.meanSamples
+    const rhoInf = solver.meanRhoInf
+    const sums = samples && !this.unstable ? await solver.readMean() : null
+    if (this.disposed || solver !== this.solver) return null
+    return {
+      step: solver.step,
+      unstable: this.unstable,
+      stats: this.series.stats(),
+      rhoInf: this.rhoInf,
+      history: this.series.all(),
+      mean: sums ? { sums, samples, rhoInf } : null,
+      voxels: c.voxels,
     }
   }
 

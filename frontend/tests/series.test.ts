@@ -40,6 +40,24 @@ describe('coefficient series', () => {
     expect(stats.cl!.std).toBeCloseTo(0.33 / Math.SQRT2, 1)
   })
 
+  it('in 3D the shedding may be sideways: the side force (cm slot) is analysed too', () => {
+    const st = 0.165
+    const f = (st * options.uLat) / options.lLat
+    const feed = (s: CoefficientSeries) => {
+      for (let step = 2000; step < 2000 + 12 / f; step += 8)
+        s.add({ step, cd: 0.5 + 0.01 * Math.sin(4 * Math.PI * f * step), cl: 0.0005, cm: 0.2 * Math.sin(2 * Math.PI * f * step) })
+    }
+    const flat = new CoefficientSeries(options)
+    feed(flat)
+    expect(flat.stats().regime).toBe('steady')
+    const sideways = new CoefficientSeries({ ...options, shedding: ['cl', 'cm'] })
+    feed(sideways)
+    const stats = sideways.stats()
+    expect(stats.regime).toBe('periodic')
+    expect(stats.strouhal!).toBeGreaterThan(0.155)
+    expect(stats.strouhal!).toBeLessThan(0.175)
+  })
+
   it('a change restarts the averages one convective time later', () => {
     const s = new CoefficientSeries(options)
     for (let step = 2000; step < 4000; step += 8) s.add({ step, cd: 2, cl: 0, cm: 0 })

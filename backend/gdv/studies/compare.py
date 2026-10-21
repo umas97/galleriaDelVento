@@ -7,6 +7,11 @@ and the conditions; a row whose simulated Reynolds number or reference length
 differs from the first says so -- the coefficients are then not directly
 comparable (SPEC §2.3). A series takes part with its first point; its curves
 are compared on the page.
+
+Studies of the 3D tunnel (SPEC §24.2 #7) compare with each other: Cd, Cl and
+the side force Cs of the whole body, on their reference areas, which must
+agree too. A 2D study next to a 3D one is never comparable: a section's
+coefficient per metre of depth and a whole body's are different things.
 """
 
 from __future__ import annotations
@@ -16,7 +21,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from ..physics.planner import ReferenceKind
-from .result import Study
+from .result import SimulationResult3D, Study
 
 __all__ = ["MAX_COMPARED", "Comparison", "CompareRow", "compare"]
 
@@ -29,12 +34,13 @@ LENGTH_TOLERANCE = 1e-3
 SMALL_COEFFICIENT = 1e-3
 NOT_COMPARABLE = "i coefficienti non sono direttamente confrontabili"
 
-Coefficient = Literal["cd", "cl", "cm", "clcd", "st"]
+Coefficient = Literal["cd", "cl", "cm", "clcd", "st", "cs"]
 
 
 class CompareRow(BaseModel):
     study_id: str
     name: str
+    dimension: Literal["2d", "3d"]
     kind: Literal["single", "series"]
     points: int
     status: Literal["converged", "provisional", "unstable"] | None
@@ -44,7 +50,12 @@ class CompareRow(BaseModel):
     reference_kind: ReferenceKind | None
     reference_length: float | None
     grid: str
+    #: 2D: the incidence; 3D: the yaw and the pitch.
     angle_deg: float | None
+    yaw_deg: float | None
+    pitch_deg: float | None
+    #: 3D: the area of the coefficients, m².
+    reference_area: float | None
     speed: float | None
     values: dict[Coefficient, float | None]
     #: Difference from the first study, in % of its value (None where undefined).
@@ -72,20 +83,40 @@ def compare(studies: list[Study]) -> Comparison:
     for index, study in enumerate(studies):
         point = study.points[0] if study.points else None
         result = point.result if point else None
-        c = result.coefficients if result else None
-        values: dict[Coefficient, float | None] = {
-            "cd": c.cd.mean if c and c.cd else None,
-            "cl": c.cl.mean if c and c.cl else None,
-            "cm": c.cm.mean if c and c.cm else None,
-            "clcd": c.clcd if c else None,
-            "st": c.strouhal if c else None,
-        }
+        three = isinstance(result, SimulationResult3D)
+        values: dict[Coefficient, float | None] = dict.fromkeys(
+            ("cd", "cl", "cm", "clcd", "st", "cs"), None
+        )
+        if isinstance(result, SimulationResult3D):
+            c3 = result.coefficients
+            values.update(
+                cd=c3.cd.mean if c3.cd else None,
+                cl=c3.cl.mean if c3.cl else None,
+                cs=c3.cs.mean if c3.cs else None,
+            )
+        elif result is not None:
+            c = result.coefficients
+            values.update(
+                cd=c.cd.mean if c.cd else None,
+                cl=c.cl.mean if c.cl else None,
+                cm=c.cm.mean if c.cm else None,
+                clcd=c.clcd,
+                st=c.strouhal,
+            )
         reasons: list[str] = []
         if index == 0:
             first, first_values = result, values
         elif result is None or first is None:
             reasons.append("nessun risultato da confrontare")
+        elif result.dimension != first.dimension:
+            reasons.append("uno studio 2D e uno 3D: coefficienti di natura diversa")
         else:
+            if (
+                isinstance(result, SimulationResult3D)
+                and isinstance(first, SimulationResult3D)
+                and _differs(result.plan.reference_area, first.plan.reference_area, RE_TOLERANCE)
+            ):
+                reasons.append("area di riferimento diversa dal primo studio")
             if _differs(result.plan.re_sim, first.plan.re_sim, RE_TOLERANCE):
                 reasons.append("Re simulato diverso dal primo studio")
             if result.plan.reference_kind != first.plan.reference_kind or _differs(
@@ -104,6 +135,7 @@ def compare(studies: list[Study]) -> Comparison:
             CompareRow(
                 study_id=study.id,
                 name=study.name,
+                dimension=result.dimension if result else "2d",
                 kind=study.kind,
                 points=len(study.points),
                 status=result.status if result else None,
@@ -113,7 +145,12 @@ def compare(studies: list[Study]) -> Comparison:
                 reference_kind=result.plan.reference_kind if result else None,
                 reference_length=result.plan.reference_length if result else None,
                 grid=result.plan.texts.grid if result else "",
-                angle_deg=result.case.angle_deg if result else None,
+                angle_deg=None if three or result is None else result.case.angle_deg,
+                yaw_deg=result.case.yaw_deg if isinstance(result, SimulationResult3D) else None,
+                pitch_deg=result.case.pitch_deg if isinstance(result, SimulationResult3D) else None,
+                reference_area=(
+                    result.plan.reference_area if isinstance(result, SimulationResult3D) else None
+                ),
                 speed=result.case.speed if result else None,
                 values=values,
                 diff=diff,

@@ -6,7 +6,10 @@
 // conditions, the coefficients, the pictures saved with the study, the charts
 // and every warning. No WebGL: Chrome in headless mode prints this page
 // (studies/report.py), opening it with a one-time token (`?stampa=`) that the
-// page claims; without the token it is the preview, with «Stampa».
+// page claims; without the token it is the preview, with «Stampa». A study
+// of the 3D tunnel (SPEC §24.2 #7) has the model's thumbnail, its conditions
+// with the blockage correction, the whole body's numbers, its three pictures
+// and the history.
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
@@ -15,9 +18,10 @@ import { ErrorNotice } from '../components/ErrorNotice'
 import { ProfileView } from '../components/ProfileView'
 import { api } from '../lib/api'
 import { num } from '../lib/format'
-import type { Study } from '../lib/types'
+import { is3d, type SimulationResult3D, type Study, type StudyPoint } from '../lib/types'
 import { sectionOf, studyStatus } from '../study/present'
 import { CoefficientsTable, ConditionsTable, PointCharts, STATUS_TONE, SectionStrip, SeriesCharts, Warnings } from '../study/StudyParts'
+import { Coefficients3DTable, Conditions3DTable, History3D, Warnings3D } from '../study/Study3D'
 import { t, type MessageKey } from '../i18n/it'
 
 export function ReportPage() {
@@ -44,9 +48,53 @@ export function ReportPage() {
   return <Report study={query.data.study} printing={claim === 'ok'} />
 }
 
+/** The body of a 3D study's report. */
+function Report3D({ study, first, result }: { study: Study; first: StudyPoint; result: SimulationResult3D }) {
+  return (
+    <>
+      {study.model_id ? (
+        <figure className="w-1/2 space-y-1">
+          <img src={api.thumbnailUrl(study.model_id)} alt="" className="h-44 w-full rounded border border-ink-700 object-contain" />
+          <figcaption className="text-xs text-ink-300">{t('studyReport.model3d', { name: result.case.name })}</figcaption>
+        </figure>
+      ) : null}
+      <Warnings3D result={result} />
+      {study.notes ? <p className="text-sm whitespace-pre-wrap">{study.notes}</p> : null}
+      <section className="grid grid-cols-2 gap-5">
+        <div>
+          <h2 className="mb-1 font-semibold text-ink-50">{t('studyReport.conditions')}</h2>
+          <Conditions3DTable result={result} steps={first.steps} />
+        </div>
+        <div>
+          <h2 className="mb-1 font-semibold text-ink-50">{t('studyReport.coefficients')}</h2>
+          <Coefficients3DTable result={result} />
+        </div>
+      </section>
+      {first.views.length ? (
+        <section className="break-before-page space-y-2">
+          <h2 className="font-semibold text-ink-50">{t('studyReport.views')}</h2>
+          <div className="grid grid-cols-1 gap-3">
+            {first.views.map((v) => (
+              <figure key={v} className="break-inside-avoid space-y-1">
+                <img src={api.studyViewUrl(study.id, 0, v)} alt="" className="w-full rounded" />
+                <figcaption className="text-xs text-ink-300">{t(`study.view.${v}` as MessageKey)}</figcaption>
+              </figure>
+            ))}
+          </div>
+        </section>
+      ) : null}
+      <section className="break-before-page space-y-2">
+        <h2 className="font-semibold text-ink-50">{t('studyReport.charts')}</h2>
+        <History3D studyId={study.id} k={0} result={result} height={220} />
+      </section>
+    </>
+  )
+}
+
 function Report({ study, printing }: { study: Study; printing: boolean }) {
   const first = study.points[0]
-  const result = first?.result
+  const any = first?.result
+  const result = any && !is3d(any) ? any : undefined
   const status = studyStatus(study)
   const section = result ? sectionOf(result.case.profile.source) : null
   return (
@@ -69,7 +117,7 @@ function Report({ study, printing }: { study: Study; printing: boolean }) {
           <p className="text-sm text-ink-300">
             {t('studyReport.subtitle', {
               date: new Date(study.created_at).toLocaleString('it-IT'),
-              version: result?.app_version ?? '',
+              version: any?.app_version ?? '',
             })}
             {status ? <span className={`ml-2 ${STATUS_TONE[status]}`}>{t(`tunnel.status.${status}` as MessageKey)}</span> : null}
           </p>
@@ -80,7 +128,8 @@ function Report({ study, printing }: { study: Study; printing: boolean }) {
           ) : null}
         </header>
 
-        {result && first ? (
+        {any && first && is3d(any) ? <Report3D study={study} first={first} result={any} /> : null}
+        {any && first && is3d(any) ? null : result && first ? (
           <>
             <section className="grid grid-cols-2 gap-4">
               <figure className="space-y-1">
@@ -124,16 +173,18 @@ function Report({ study, printing }: { study: Study; printing: boolean }) {
                   </thead>
                   <tbody>
                     {study.points.map((p, i) => {
-                      const c = p.result.coefficients
+                      const r = p.result
+                      if (is3d(r)) return null
+                      const c = r.coefficients
                       return (
                         <tr key={i} className="border-t border-ink-700">
                           <td>{study.series!.parameter === 'depth' ? `${num(100 * (p.value ?? 0), 1)}%` : num(p.value ?? 0, 2)}</td>
-                          <td className={STATUS_TONE[p.result.status]}>{t(`tunnel.status.${p.result.status}` as MessageKey)}</td>
+                          <td className={STATUS_TONE[r.status]}>{t(`tunnel.status.${r.status}` as MessageKey)}</td>
                           <td className="font-mono">{c.cd ? num(c.cd.mean, 4) : '—'}</td>
                           <td className="font-mono">{c.cl ? num(c.cl.mean, 4) : '—'}</td>
                           <td className="font-mono">{c.cm ? num(c.cm.mean, 4) : '—'}</td>
                           <td className="font-mono">{c.strouhal !== null ? num(c.strouhal, 3) : '—'}</td>
-                          <td className="text-xs">{p.result.plan.texts.reynolds}</td>
+                          <td className="text-xs">{r.plan.texts.reynolds}</td>
                         </tr>
                       )
                     })}

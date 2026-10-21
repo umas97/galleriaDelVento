@@ -1,15 +1,17 @@
 # galleriaDelVento -- real-time 2D wind tunnel for sections, sketches and profiles
 # SPDX-License-Identifier: GPL-3.0-or-later
 """The conditions of a result as Italian lines (SPEC §2.3), for every file that
-leaves the program: CSV comments, the VTK header. No number without them."""
+leaves the program: CSV comments, the VTK header. No number without them.
+A 3D result says its rotations, its reference area and the blockage the
+coefficients are corrected for (SPEC §24.6)."""
 
 from __future__ import annotations
 
 from ..geometry.profile import EditorSource, Section3DSource
 from ..physics.planner import reynolds_text
-from .result import SimulationResult, Study
+from .result import SimulationResult, SimulationResult3D, Study
 
-__all__ = ["STATUS_TEXT", "conditions_lines", "it_number", "section_text"]
+__all__ = ["STATUS_TEXT", "conditions_lines", "conditions_lines3d", "it_number", "section_text"]
 
 STATUS_TEXT = {"converged": "convergente", "provisional": "provvisorio", "unstable": "non valido"}
 _FLUID = {"aria": "aria", "acqua": "acqua"}
@@ -44,7 +46,36 @@ def section_text(result: SimulationResult) -> str | None:
     )
 
 
-def conditions_lines(study: Study, result: SimulationResult) -> list[str]:
+def conditions_lines3d(study: Study, result: SimulationResult3D) -> list[str]:
+    case, plan = result.case, result.plan
+    correction = plan.blockage_correction
+    lines = [
+        f"galleriaDelVento {result.app_version} — studio «{study.name}» (galleria 3D)",
+        f"Modello: «{case.name}»; imbardata {it_number(case.yaw_deg, 3)}°, "
+        f"beccheggio {it_number(case.pitch_deg, 3)}°",
+        f"Fluido: {_FLUID[case.fluid]} a {it_number(case.temperature_c, 3)} °C; "
+        f"velocità {it_number(case.speed)} m/s; pavimento {_GROUND[case.ground]}",
+        f"Re reale {reynolds_text(plan.re_real)}; Re simulato {reynolds_text(plan.re_sim)}"
+        + ("; similitudine parziale" if plan.partial_similarity else ""),
+        f"Lunghezza di riferimento: {_REFERENCE[plan.reference_kind]} "
+        f"{it_number(plan.reference_length)} m; area di riferimento (frontale delle celle) "
+        f"{it_number(plan.reference_area)} m²",
+        f"Griglia: {plan.texts.grid}; tau {it_number(plan.tau, 5)}; camera "
+        f"{it_number(plan.length_m)} × {it_number(plan.width_m)} × {it_number(plan.height_m)} m",
+        f"Bloccaggio d'area {it_number(plan.blockage * 100, 3)}%: coefficienti e forze corretti "
+        f"come all'aria libera, × {it_number(correction, 4)} (correzione per continuità)",
+        "Griglia grossolana: i dettagli più piccoli di una cella non esistono per il flusso",
+        f"Stato: {STATUS_TEXT[result.status]}",
+        "Forze sul corpo intero (N): resistenza lungo x, portanza lungo z, laterale lungo y",
+    ]
+    if plan.mach_warning:
+        lines.append("Oltre Mach 0,3: la comprimibilità non è considerata")
+    return lines
+
+
+def conditions_lines(study: Study, result: SimulationResult | SimulationResult3D) -> list[str]:
+    if isinstance(result, SimulationResult3D):
+        return conditions_lines3d(study, result)
     case, plan = result.case, result.plan
     lines = [
         f"galleriaDelVento {result.app_version} — studio «{study.name}»",

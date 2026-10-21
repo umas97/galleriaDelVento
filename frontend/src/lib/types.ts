@@ -437,6 +437,7 @@ export type CasePlan3D = {
   reference_area: number
   a_lat: number
   blockage: number
+  blockage_correction: number
   tc_steps: number
   ramp_steps: number
   transient_steps: number
@@ -485,6 +486,25 @@ export type Forces = {
   unit: 'N/m'
 }
 
+export type Coefficients3D = {
+  cd: Stat | null
+  cl: Stat | null
+  cs: Stat | null
+  cd_measured: Stat | null
+  blockage_correction: number
+  regime: 'steady' | 'periodic' | null
+  change: number | null
+  averaged_steps: number
+  rho_inf: number
+}
+
+export type Forces3D = {
+  drag: number | null
+  lift: number | null
+  side: number | null
+  unit: 'N'
+}
+
 export type TimeSeriesRef = {
   file: string
   samples: number
@@ -505,6 +525,21 @@ export type FieldRef = {
   samples: number
 }
 
+export type FieldName3D = 'u' | 'v' | 'w' | 'cp'
+
+export type FieldRef3D = {
+  file: string
+  key: string
+  name: FieldName3D
+  unit: string
+  scale: number
+  nx: number
+  ny: number
+  nz: number
+  dx: number
+  samples: number
+}
+
 export type ContourCpRef = {
   file: string
   points: number
@@ -514,6 +549,7 @@ export type ContourCpRef = {
 export type ResultStatus = 'converged' | 'provisional' | 'unstable'
 
 export type SimulationResult = {
+  dimension?: '2d'
   case: CaseSetup
   plan: CasePlan
   status: ResultStatus
@@ -527,11 +563,29 @@ export type SimulationResult = {
   schema_version: number
 }
 
-export type ViewName = 'velocita' | 'cp' | 'vorticita' | 'fumo' | 'modello'
+export type SimulationResult3D = {
+  dimension: '3d'
+  case: CaseSetup3D
+  plan: CasePlan3D
+  status: ResultStatus
+  coefficients: Coefficients3D
+  forces_real: Forces3D
+  history: TimeSeriesRef
+  fields: FieldRef3D[]
+  created_at: string
+  app_version: string
+  schema_version: number
+}
+
+export type AnyResult = SimulationResult | SimulationResult3D
+
+export const is3d = (r: AnyResult): r is SimulationResult3D => r.dimension === '3d'
+
+export type ViewName = 'velocita' | 'cp' | 'vorticita' | 'fumo' | 'modello' | 'vista' | 'piano' | 'superficie'
 
 export type StudyPoint = {
   value: number | null
-  result: SimulationResult
+  result: SimulationResult | SimulationResult3D
   steps: number
   elapsed_s: number
   views: ViewName[]
@@ -575,6 +629,7 @@ export type StudySummary = {
   profile_name: string
   model_id: string | null
   model_name: string | null
+  dimension: '2d' | '3d'
   cd: number | null
   cl: number | null
   reynolds: string
@@ -609,6 +664,14 @@ export type HistoryData = {
   cm: number[]
 }
 
+export type HistoryData3D = {
+  every: number
+  step: number[]
+  cd: number[]
+  cl: number[]
+  cs: number[]
+}
+
 export type ContourData = {
   chord: boolean
   xc: number[]
@@ -625,6 +688,7 @@ export type MeanData = {
 }
 
 export type PointUpload = {
+  dimension?: '2d'
   value: number | null
   case: CaseSetup
   plan: CasePlan
@@ -637,11 +701,25 @@ export type PointUpload = {
   elapsed_s: number
 }
 
-export type CoefficientKey = 'cd' | 'cl' | 'cm' | 'clcd' | 'st'
+export type PointUpload3D = {
+  dimension: '3d'
+  value: null
+  case: CaseSetup3D
+  plan: CasePlan3D
+  status: ResultStatus
+  coefficients: Coefficients3D
+  history: HistoryData3D
+  mean: MeanData | null
+  steps: number
+  elapsed_s: number
+}
+
+export type CoefficientKey = 'cd' | 'cl' | 'cm' | 'clcd' | 'st' | 'cs'
 
 export type CompareRow = {
   study_id: string
   name: string
+  dimension: '2d' | '3d'
   kind: 'single' | 'series'
   points: number
   status: ResultStatus | null
@@ -652,6 +730,9 @@ export type CompareRow = {
   reference_length: number | null
   grid: string
   angle_deg: number | null
+  yaw_deg: number | null
+  pitch_deg: number | null
+  reference_area: number | null
   speed: number | null
   values: Record<CoefficientKey, number | null>
   diff: Record<CoefficientKey, number | null>

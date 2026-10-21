@@ -3,7 +3,7 @@
 //
 // Messages between the 3D tunnel and its geometry thread (voxel.worker.ts),
 // and the page's side: one promise per request, answered in order.
-import type { Box3, Grid3, Vec3 } from './voxelize'
+import type { Box3, Grid3, Vec3, WallLinks } from './voxelize'
 
 export type ToVoxelWorker =
   | { type: 'load'; id: number; buffer: ArrayBuffer }
@@ -13,7 +13,7 @@ export type ToVoxelWorker =
 export type FromVoxelWorker =
   | { type: 'loaded'; id: number; pivot: Vec3; size: Vec3; triangles: number }
   | { type: 'body'; id: number; box: Box3; area: number }
-  | { type: 'voxels'; id: number; voxels: Uint8Array<ArrayBuffer>; frontalCells: number }
+  | { type: 'voxels'; id: number; voxels: Uint8Array<ArrayBuffer>; walls: WallLinks; frontalCells: number }
   | { type: 'error'; id: number; message: string }
 
 export type WorkerLike = {

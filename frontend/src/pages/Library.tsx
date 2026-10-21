@@ -425,6 +425,11 @@ function StudyGrid({
                       : t('study.kind.single')}
                 </p>
                 <p className="flex gap-2 text-xs">
+                  {study.dimension === '3d' ? (
+                    <span className="rounded bg-accent/20 px-1 text-accent" data-testid="study-3d">
+                      {t('library.study.3d')}
+                    </span>
+                  ) : null}
                   {study.status ? <span className={STATUS_TONE[study.status]}>{t(`tunnel.status.${study.status}` as MessageKey)}</span> : null}
                   {study.state === 'running' ? <span className="text-warn">{t('series.state.running')}</span> : null}
                   <span className="truncate text-ink-300">{study.model_name ?? study.profile_name}</span>

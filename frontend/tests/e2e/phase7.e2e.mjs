@@ -1,12 +1,15 @@
 // galleriaDelVento -- real-time 2D wind tunnel for sections, sketches and profiles
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Test 41, the Phase 7b half (SPEC §24.4): a simplified Ahmed body opened in
-// the 3D tunnel from its setup screen; the flow runs; the cut plane (speed and
-// Cp, three orientations), Cp on the surface, smoke from the rake (moved and
-// turned vertical), particles; the camera; a rotation and a new speed restart
-// the flow; snapshot and video; the WebGPU device lost and resumed; a browser
-// without WebGPU gets its message. No console errors.
+// Test 41 (SPEC §24.4): a simplified Ahmed body opened in the 3D tunnel from
+// its setup screen; the flow runs; the cut plane (speed and Cp, three
+// orientations), Cp on the surface, smoke from the rake (moved and turned
+// vertical), particles, the voxels (SPEC §24.8); the camera; snapshot and
+// video; the whole body's numbers and forces, a study saved with its three
+// pictures and mean field, its page, exports (history CSV, VTK), the report
+// page and its PDF, the comparison (Phase 7c); a rotation and a new speed
+// restart the flow; the WebGPU device lost and resumed; a browser without
+// WebGPU gets its message. No console errors.
 //
 // Chrome runs WebGPU on the real GPU (Vulkan, as the benchmarks): in headless
 // Chrome a WebGPU canvas on SwiftShader loses its instance at the first frame
@@ -159,6 +162,78 @@ try {
   const [video] = await Promise.all([page.waitForEvent('download'), page.keyboard.press('v')])
   assert(/\.webm$/.test(video.suggestedFilename()), video.suggestedFilename())
   assert(readFileSync(await video.path()).length > 1000, 'video vuoto')
+
+  // --- the voxels, as the flow sees the body (SPEC §24.8) --------------------------------------
+  await page.keyboard.press('7')
+  assert(await page.getByTestId('show-voxels').isChecked(), 'mostra i voxel')
+  await page.waitForTimeout(800)
+  await shot(page, 'p7-voxels')
+  await page.keyboard.press('7')
+
+  // --- numbers and a saved study (Phase 7c) ----------------------------------------------------
+  const hasNumber = (id) =>
+    page.waitForFunction(
+      (testId) => /\d/.test((document.querySelector(`[data-testid="${testId}"]`)?.textContent ?? '').split('ⓘ').pop()),
+      id,
+      { timeout: 180_000 },
+    )
+  await hasNumber('coef-cd')
+  await hasNumber('coef-cl')
+  await hasNumber('coef-cs')
+  assert(/\d.* N$/.test(await page.getByTestId('force-drag').innerText()), 'resistenza in N')
+  assert(/correzione di bloccaggio/.test(await page.getByTestId('result-conditions').innerText()), 'condizioni dei numeri')
+  await shot(page, 'p7-results')
+  await page.getByTestId('study-save').click()
+  await page.getByTestId('study-name').fill('e2e ahmed 3D')
+  await page.getByTestId('study-save-confirm').click()
+  await page.getByTestId('study-saved').waitFor({ timeout: 120_000 })
+  const studyHref = await page.getByTestId('study-saved').getByRole('link').getAttribute('href')
+  const studyId = studyHref.split('/').pop()
+  const study = await fetch(`${app.url}api/studies/${studyId}`).then((r) => r.json())
+  const result = study.study.points[0].result
+  assert(result.dimension === '3d', 'risultato 3D')
+  assert(result.coefficients.cd && result.coefficients.cd_measured, 'Cd corretto e misurato')
+  assert(result.coefficients.cd.mean < result.coefficients.cd_measured.mean, 'la correzione di bloccaggio abbassa Cd')
+  assert(result.forces_real.unit === 'N' && result.forces_real.drag > 0, 'forze in N')
+  assert(result.fields.length === 4, `campi medi 3D: ${result.fields.length}`)
+  assert(['vista', 'piano', 'superficie'].every((v) => study.study.points[0].views.includes(v)), `immagini: ${study.study.points[0].views}`)
+
+  // The study's page: numbers, conditions, pictures, exports.
+  await page.goto(`${app.url}studi/${studyId}`)
+  await page.getByTestId('study-coefficients').waitFor()
+  assert(/Cd misurato nella camera/.test(await page.getByTestId('study-coefficients').innerText()), 'Cd misurato')
+  assert(/Bloccaggio d’area/.test(await page.getByTestId('study-conditions').innerText()), 'bloccaggio tra le condizioni')
+  await page.waitForFunction(() => {
+    const imgs = Array.from(document.querySelectorAll('[data-testid="study-views"] img'))
+    return imgs.length === 3 && imgs.every((i) => i.complete && i.naturalWidth > 0)
+  })
+  await shot(page, 'p7-study')
+  const [vti] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Campi 3D (VTK .vti)' }).click()])
+  const vtk = readFileSync(await vti.path())
+  const head = vtk.subarray(0, 4000).toString('latin1')
+  assert(/<VTKFile type="ImageData"/.test(head) && new RegExp(`WholeExtent="0 ${result.plan.nx - 1} 0 ${result.plan.ny - 1} 0 ${result.plan.nz - 1}"`).test(head), 'VTK 3D')
+  const [csv] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Storia (CSV)' }).click()])
+  assert(/passo;tempo_s;Cd;Cl;Cs/.test(readFileSync(await csv.path(), 'utf8')), 'storia con Cs')
+
+  // The report page and its PDF.
+  await page.goto(`${app.url}report/${studyId}`)
+  await page.getByTestId('report').waitFor()
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="report"] img').length >= 4)
+  await page.getByTestId('chart-history').waitFor()
+  await shot(page, 'p7-report')
+  const pdf = await fetch(`${app.url}api/studies/${studyId}/report.pdf`)
+  assert(pdf.ok && (await pdf.arrayBuffer()).byteLength > 10_000, `report PDF: ${pdf.status}`)
+
+  // The comparison of 3D studies: Cs in the table, the pictures side by side.
+  await page.goto(`${app.url}confronto?studi=${studyId}`)
+  await page.getByTestId('compare-table').waitFor()
+  assert(/Cs/.test(await page.getByTestId('compare-table').innerText()), 'Cs nel confronto')
+  await page.getByTestId('compare-views3d').waitFor()
+
+  // Back to the tunnel for the rest.
+  await page.goto(`${app.url}galleria3d/${id}`)
+  await page.getByTestId('resolution').selectOption('bozza')
+  await running('di nuovo nella galleria')
 
   // --- a rotation and a new speed restart the flow -------------------------------------------
   const area = async () => (await page.getByTestId('voxel-info').innerText()).match(/area frontale ([\d,]+)/)[1]

@@ -15,7 +15,7 @@ import { api } from '../lib/api'
 import { frameAround, frameWidthFor, bodyBox, parseFields, rangeOf, valuesOf, type FieldShown } from '../lib/fields'
 import { num } from '../lib/format'
 import { useSettings } from '../lib/settings'
-import type { SimulationResult, Study } from '../lib/types'
+import { is3d, type SimulationResult, type Study, type StudyPoint } from '../lib/types'
 import { Legend, digitsFor } from '../tunnel/parts'
 import { t, type MessageKey } from '../i18n/it'
 import { conditionRows, parameterLabel, seriesX, warningsOf } from './present'
@@ -177,9 +177,14 @@ export function MeanFields({ studyId, k, result }: { studyId: string; k: number;
 }
 
 /** The coefficients of a series against its parameter, and for incidence the polar Cl–Cd. */
+/** The points of a series with their 2D results (a series is always 2D). */
+function points2d(study: Study): (StudyPoint & { result: SimulationResult })[] {
+  return study.points.filter((p): p is StudyPoint & { result: SimulationResult } => !is3d(p.result))
+}
+
 export function SeriesCharts({ study, height = 220 }: { study: Study; height?: number }) {
   const parameter = study.series?.parameter ?? 'angle'
-  const points = study.points.filter((p) => p.result.status !== 'unstable')
+  const points = points2d(study).filter((p) => p.result.status !== 'unstable')
   const curve = (label: string, color: string, y: (r: SimulationResult) => number | null | undefined, line = true): XYCurve => ({
     label,
     color,
@@ -224,7 +229,7 @@ export function SeriesCharts({ study, height = 220 }: { study: Study; height?: n
 export function SectionStrip({ study }: { study: Study }) {
   return (
     <ul className="grid grid-cols-[repeat(auto-fill,minmax(110px,1fr))] gap-2" data-testid="series-sections">
-      {study.points.map((p, k) => (
+      {points2d(study).map((p, k) => (
         <li key={k} className="rounded border border-ink-700 p-1 text-center text-xs print:border-neutral-300">
           <ProfileView loops={p.result.case.profile.loops.map((l) => l.points)} grid={false} className="h-16 w-full" />
           {num(100 * (p.value ?? 0), 1)}%

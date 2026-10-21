@@ -197,6 +197,8 @@ export const api = {
   compareStudies: (ids: string[]) => request<Comparison>('/api/studies/compare', { method: 'POST', body: json({ ids }) }),
   studyHistory: (id: string, k: number) =>
     request<{ step: number[]; cd: number[]; cl: number[]; cm: number[] }>(`/api/studies/${id}/points/${k}/history`),
+  studyHistory3d: (id: string, k: number) =>
+    request<{ step: number[]; cd: number[]; cl: number[]; cs: number[] }>(`/api/studies/${id}/points/${k}/history`),
   studyContour: (id: string, k: number) =>
     request<{ xc: number[]; s: number[]; upper: boolean[]; cp: number[]; x: number[]; y: number[] }>(`/api/studies/${id}/points/${k}/contour`),
   studyFields: (id: string, k: number) => requestBuffer(`/api/studies/${id}/points/${k}/fields.bin`),

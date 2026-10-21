@@ -5,7 +5,8 @@
 * ``.vti`` (ImageData): the time-averaged fields on the cell centres of the
   chamber -- velocity (m/s, a vector), Cp, pressure difference (Pa), vorticity
   (1/s) and the body's mask -- in real units, metres, origin at the bottom-left
-  corner of the chamber;
+  corner of the chamber; for a 3D result (SPEC §24.2 #7) the whole chamber,
+  without the vorticity (ParaView's Gradient filter gives it);
 * ``.vtp`` (PolyData): the sampled outline with its mean Cp, as one polyline
   ordered along the perimeter.
 
@@ -21,9 +22,9 @@ from xml.sax.saxutils import quoteattr
 import numpy as np
 
 from .conditions import conditions_lines
-from .result import FieldRef, Study
+from .result import FieldRef, FieldRef3D, Study
 
-__all__ = ["contour_vtp", "fields_vti"]
+__all__ = ["contour_vtp", "fields_vti", "fields_vti3d"]
 
 
 def _comment(lines: list[str]) -> str:
@@ -109,6 +110,44 @@ def fields_vti(study: Study, k: int, refs: list[FieldRef], arrays: dict[str, np.
     )
     header = conditions_lines(study, result) + [
         f"Campi medi nel tempo su {ref.samples} campioni, centri delle celle, metri",
+    ]
+    return _document("ImageData", header, body, data)
+
+
+def fields_vti3d(
+    study: Study, k: int, refs: list[FieldRef3D], arrays: dict[str, np.ndarray]
+) -> bytes:
+    result = study.points[k].result
+    by_name = {r.name: r for r in refs}
+    ref = refs[0]
+    nx, ny, nz, dx = ref.nx, ref.ny, ref.nz, ref.dx
+
+    def real(name: str) -> np.ndarray:
+        # (nz, ny, nx), x fastest: VTK's point order.
+        return (arrays[name].astype(np.float32) * np.float32(by_name[name].scale)).ravel()
+
+    velocity = np.stack([real("u"), real("v"), real("w")], axis=1)
+    cp = real("cp")
+    data = _Appended()
+    arrays_xml = (
+        _array(data, "velocita_m_s", velocity, 3)
+        + _array(data, "Cp", cp)
+        + _array(data, "pressione_Pa", (cp * np.float32(result.plan.dynamic_pressure)))
+        + _array(data, "solido", arrays["solid"].astype(np.uint8).ravel())
+    )
+    extent = f"0 {nx - 1} 0 {ny - 1} 0 {nz - 1}"
+    half = dx / 2
+    body = (
+        f'  <ImageData WholeExtent="{extent}" Origin="{half!r} {half!r} {half!r}" '
+        f'Spacing="{dx!r} {dx!r} {dx!r}">\n'
+        f'    <Piece Extent="{extent}">\n'
+        '      <PointData Scalars="Cp" Vectors="velocita_m_s">\n'
+        + arrays_xml
+        + "      </PointData>\n    </Piece>\n  </ImageData>\n"
+    )
+    header = conditions_lines(study, result) + [
+        f"Campi medi nel tempo su {ref.samples} campioni, centri delle celle, metri; "
+        "origine nell'angolo della camera all'ingresso, sul pavimento",
     ]
     return _document("ImageData", header, body, data)
 

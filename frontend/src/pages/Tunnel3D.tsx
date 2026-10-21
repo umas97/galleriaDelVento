@@ -21,9 +21,10 @@ import { GuideLink } from '../guide/Guide'
 import { api, requestBuffer } from '../lib/api'
 import { isTextField, metres, num } from '../lib/format'
 import { parseMesh } from '../lib/meshBinary'
+import { setUnsaved } from '../lib/busy'
 import { useSetSetting, useSettings } from '../lib/settings'
 import { token, useTheme } from '../lib/theme'
-import type { AppSettings, CasePlan3D, CaseSetup3D, Fluid, Ground, InletProfile, ModelRecord, ReferenceKind, Resolution, StudyTypePreset } from '../lib/types'
+import type { AppSettings, CasePlan3D, CaseSetup3D, Fluid, Ground, InletProfile, ModelRecord, ReferenceKind, Resolution, StudyMeta, StudyTypePreset } from '../lib/types'
 import { VIEW_THRESHOLD } from '../scene3d/useModelGeometry'
 import type { CameraView } from '../sim3d/camera'
 import { Engine3D, type Snapshot3D, type ViewOptions3D } from '../sim3d/engine'
@@ -31,7 +32,12 @@ import { WebGpuUnsupported } from '../sim3d/gpu'
 import { hexColor, vertexNormals, type BodyMesh, type PlaneAxis, type Rake } from '../sim3d/scene'
 import type { Box3, Vec3 } from '../sim3d/voxelize'
 import { VoxelClient } from '../sim3d/voxelProtocol'
+import type { WallLinks } from '../sim3d/voxelize'
+import { cellText } from '../study/present'
 import { rememberedCase } from '../tunnel/lastCase'
+import { Results3D, type Save3D } from '../tunnel/Results3D'
+import { metaPart, packParts } from '../tunnel/study'
+import { collectPoint3d } from '../tunnel/study3d'
 import { Badge, Legend, NumberField, Panel, Row, Select, digitsFor } from '../tunnel/parts'
 import { t, type MessageKey } from '../i18n/it'
 
@@ -69,10 +75,6 @@ function stamp(): string {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
 }
 
-/** A length with a sensible unit for a cell (mm under a centimetre). */
-function cellText(dx: number): string {
-  return dx < 0.01 ? `${num(dx * 1000, 1)} mm` : metres(dx)
-}
 
 export function Tunnel3DPage() {
   const { id = '' } = useParams()
@@ -167,6 +169,7 @@ function Bench3D({ model, preset, settings }: { model: ModelRecord; preset: Stud
   const [view, setView] = useState<ViewOptions3D>({
     plane: { shown: true, axis: 1, position: 0, field: 'speed' },
     surfaceCp: Boolean(benchMode),
+    voxels: false,
     smoke: Boolean(benchMode),
     particles: Boolean(benchMode),
     rake: null,
@@ -239,9 +242,11 @@ function Bench3D({ model, preset, settings }: { model: ModelRecord; preset: Stud
 
   // --- the case: body → plan → voxels → plan with the voxels' area → solver ------------
   const physicsKey = JSON.stringify(state)
-  const voxelCache = useRef<{ key: string; voxels: Uint8Array; frontalCells: number } | null>(null)
+  const voxelCache = useRef<{ key: string; voxels: Uint8Array; walls: WallLinks; frontalCells: number } | null>(null)
   const caseSeq = useRef(0)
   const framed = useRef(false)
+  /** The setup of the plan running, and when it started (a study saves both). */
+  const running = useRef<{ setup: CaseSetup3D; since: number } | null>(null)
   useEffect(() => {
     if (!engine || !geometry) return
     const seq = ++caseSeq.current
@@ -281,7 +286,7 @@ function Bench3D({ model, preset, settings }: { model: ModelRecord; preset: Stud
         const g = { nx: first.nx, ny: first.ny, nz: first.nz, dx: first.dx, offset: first.offset }
         const made = await geometry.voxels.voxels(y, p, g, model.repaired_report.watertight)
         if (stale()) return
-        cached = voxelCache.current = { key, voxels: made.voxels, frontalCells: made.frontalCells }
+        cached = voxelCache.current = { key, voxels: made.voxels, walls: made.walls, frontalCells: made.frontalCells }
       }
       // The coefficients' area is the voxels' frontal area (SPEC §24.6): same grid, new numbers.
       const area = cached.frontalCells * first.dx * first.dx
@@ -290,8 +295,9 @@ function Bench3D({ model, preset, settings }: { model: ModelRecord; preset: Stud
       const same = second.nx === first.nx && second.ny === first.ny && second.nz === first.nz && second.dx === first.dx
       const chosen = same ? second : first
       setPrep('solver')
-      await engine.setCase({ plan: chosen, voxels: cached.voxels, voxelKey: key, pivot: geometry.pivot })
+      await engine.setCase({ plan: chosen, voxels: cached.voxels, walls: cached.walls, voxelKey: key, pivot: geometry.pivot })
       if (stale()) return
+      running.current = { setup: same ? { ...setup, reference_area_m2: area } : setup, since: performance.now() }
       let solid = 0
       for (const v of cached.voxels) solid += v
       setVoxelInfo({ cells: solid, area })
@@ -465,6 +471,48 @@ function Bench3D({ model, preset, settings }: { model: ModelRecord; preset: Stud
     out.toBlob((blob) => blob && download(blob, `galleria3d-${stamp()}.png`), 'image/png')
   }, [engine, caption])
 
+  // --- «Salva studio» (SPEC §24.2 #7) ---------------------------------------------------
+  const saver: Save3D = {
+    defaultName: () => {
+      const p = latest.current.plan
+      return t('tunnel3d.save.defaultName', { name: model.name, speed: num(latest.current.state.speed, 2), yaw: num(p?.yaw_deg ?? 0, 1) })
+    },
+    save: async (name, notes) => {
+      const p = latest.current.plan
+      const r = running.current
+      if (!engine || !p || !r || !bodyBox) return null
+      const point = await collectPoint3d(engine, {
+        setup: r.setup,
+        plan: p,
+        elapsedSeconds: (performance.now() - r.since) / 1000,
+        lines: caption(),
+        box: bodyBox,
+        options: latest.current.view,
+        sequential: latest.current.view.sequential,
+        diverging: latest.current.view.diverging,
+      })
+      if (!point) return null
+      const meta: StudyMeta = { name, notes, profile_id: null, profile_name: model.name, model_id: model.id, model_name: model.name, series: null }
+      const parts = [metaPart(meta), ...point.parts]
+      if (point.thumbnail) parts.push({ name: 'miniatura', data: point.thumbnail })
+      const study = await api.createStudy(packParts(parts))
+      const s = engine.snapshot()
+      savedWindow.current = s.step - s.stats.averagedSteps
+      setSavedTick((n) => n + 1)
+      return { id: study.id, name: study.name }
+    },
+  }
+
+  // Results not saved as a study: closing the window asks first (SPEC §13), as in 2D.
+  const savedWindow = useRef<number | null>(null)
+  const [savedTick, setSavedTick] = useState(0)
+  const averagingFrom = snap ? snap.step - snap.stats.averagedSteps : null
+  const hasNumbers = Boolean(snap?.stats.cd && !snap.unstable)
+  useEffect(() => {
+    setUnsaved(hasNumbers && averagingFrom !== savedWindow.current ? t('tunnel.unsavedLeave') : null)
+  }, [hasNumbers, averagingFrom, savedTick])
+  useEffect(() => () => setUnsaved(null), [])
+
   const stopRecording = useCallback(() => {
     recorder.current?.stop()
     recorder.current = null
@@ -543,6 +591,9 @@ function Bench3D({ model, preset, settings }: { model: ModelRecord; preset: Stud
           break
         case '5':
           setView((v) => ({ ...v, particles: !v.particles }))
+          break
+        case '7':
+          setView((v) => ({ ...v, voxels: !v.voxels }))
           break
         case '6':
           setView((v) => ({ ...v, plane: { ...v.plane, shown: !v.plane.shown } }))
@@ -973,6 +1024,12 @@ function Bench3D({ model, preset, settings }: { model: ModelRecord; preset: Stud
               {t('tunnel3d.particles')}
             </label>
             <label className="flex items-center gap-2">
+              <input type="checkbox" checked={view.voxels} onChange={(e) => setView((v) => ({ ...v, voxels: e.target.checked }))} data-testid="show-voxels" />
+              <Tip text={t('tunnel3d.showVoxels.tip')}>
+                <span>{t('tunnel3d.showVoxels')}</span>
+              </Tip>
+            </label>
+            <label className="flex items-center gap-2">
               <input
                 type="checkbox"
                 checked={view.locked !== null}
@@ -1074,6 +1131,11 @@ function Bench3D({ model, preset, settings }: { model: ModelRecord; preset: Stud
           ) : null}
           {support === 'pending' ? <p className="absolute inset-0 m-auto h-6 w-fit text-ink-300">{t('tunnel3d.loading')}</p> : null}
         </section>
+        {plan && snap ? (
+          <aside className="w-72 shrink-0 overflow-y-auto border-l border-ink-700 bg-ink-850 p-3" data-testid="results-aside">
+            <Results3D plan={plan} snapshot={snap} badges={null} saver={saver} />
+          </aside>
+        ) : null}
       </div>
     </div>
   )

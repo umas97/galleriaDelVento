@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // The geometry of the 3D tunnel's views, without the GPU (vitest checks it):
-// where the model sits in the chamber, its normals, the rake's nozzles, the
-// points the colour ranges are sampled at, and the ranges themselves.
+// where the model sits in the chamber, its normals, the body as the flow sees
+// it (the voxels' outer faces), the rake's nozzles, the points the colour
+// ranges are sampled at, and the ranges themselves.
 import type { CasePlan3D } from '../lib/types'
 import type { Mat4, Vec3 } from './camera'
 import { caseRotation } from './voxelize'
@@ -52,6 +53,57 @@ export function modelMatrix(pivot: Vec3, offset: Vec3, yawDeg: number, pitchDeg:
   const m = new Float32Array(16)
   m.set([r[0], r[3], r[6], 0, r[1], r[4], r[7], 0, r[2], r[5], r[8], 0, t[0], t[1], t[2], 1])
   return m
+}
+
+/**
+ * The body as the flow sees it (SPEC §24.8, «Mostra i voxel»): the faces of
+ * the solid cells that touch fluid, flat-shaded, brought back to library
+ * coordinates -- p = pivot + Rᵀ (q − offset) -- so that the model's matrices
+ * draw them where the cells are.
+ */
+export function voxelSurface(voxels: Uint8Array, plan: CasePlan3D, pivot: Vec3): BodyMesh {
+  const { nx, ny, nz, dx, offset } = plan
+  const r = caseRotation(plan.yaw_deg, plan.pitch_deg)
+  const solid = (x: number, y: number, z: number) =>
+    x >= 0 && y >= 0 && z >= 0 && x < nx && y < ny && z < nz && voxels[x + nx * (y + ny * z)] === 1
+  const positions: number[] = []
+  const normals: number[] = []
+  const back = (q: number[]) => {
+    const d = [q[0] * dx - offset[0], q[1] * dx - offset[1], q[2] * dx - offset[2]]
+    // Rᵀ d (r is row-major).
+    for (let i = 0; i < 3; i++) positions.push(pivot[i] + r[i] * d[0] + r[3 + i] * d[1] + r[6 + i] * d[2])
+  }
+  // Per axis a and side s: the face's corners, anticlockwise seen from outside.
+  for (let z = 0; z < nz; z++)
+    for (let y = 0; y < ny; y++)
+      for (let x = 0; x < nx; x++) {
+        if (!solid(x, y, z)) continue
+        for (let a = 0; a < 3; a++)
+          for (const side of [-1, 1]) {
+            const o = [x, y, z]
+            o[a] += side
+            if (solid(o[0], o[1], o[2])) continue
+            const u = (a + 1) % 3
+            const v = (a + 2) % 3
+            const base = [x, y, z]
+            if (side > 0) base[a] += 1
+            const corner = (du: number, dv: number) => {
+              const q = [...base]
+              q[u] += du
+              q[v] += dv
+              return q
+            }
+            const quad = side > 0 ? [corner(0, 0), corner(1, 0), corner(1, 1), corner(0, 1)] : [corner(0, 0), corner(0, 1), corner(1, 1), corner(1, 0)]
+            for (const q of quad) back(q)
+            const n = [0, 0, 0]
+            n[a] = side
+            for (let k = 0; k < 4; k++) for (let i = 0; i < 3; i++) normals.push(r[i] * n[0] + r[3 + i] * n[1] + r[6 + i] * n[2])
+          }
+      }
+  const quads = positions.length / 12
+  const indices = new Uint32Array(6 * quads)
+  for (let k = 0; k < quads; k++) indices.set([4 * k, 4 * k + 1, 4 * k + 2, 4 * k, 4 * k + 2, 4 * k + 3], 6 * k)
+  return { positions: new Float32Array(positions), indices, normals: new Float32Array(normals) }
 }
 
 /** The rotation alone (for normals). */

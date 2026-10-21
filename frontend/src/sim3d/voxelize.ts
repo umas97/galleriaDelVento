@@ -16,10 +16,19 @@
 //   such a ray abstains, and the cell takes the majority of the rays along
 //   x, y and z that did not (a tie counts as solid).
 //
+// - `wallLinks`: where the links between cell centres meet the surface, for the
+//   solver's interpolated walls (SPEC §24.8): every link that crosses a
+//   triangle is a wall for its fluid ends, at the nearest crossing -- also
+//   between two fluid cells, so that a part thinner than a cell still exists
+//   for the flow.
+//
 // Coordinates on the grid are in cells with the cell centres on the integers;
 // the mesh is moved by a few millionths of a cell so that a vertex or an edge
 // never sits exactly on a ray (a ray through an edge shared by two triangles
 // would cross it twice or not at all).
+
+// With its extension: Node runs this module directly in the benchmarks.
+import { C, OPPOSITE, Q } from './lattice3d.generated.ts'
 
 export type Vec3 = [number, number, number]
 export type Box3 = [number, number, number, number, number, number]
@@ -117,6 +126,15 @@ const JITTER: Vec3 = [1.234567e-6, 2.345671e-6, 3.456712e-6]
 
 export type Grid3 = { nx: number; ny: number; nz: number; dx: number; offset: Vec3 }
 
+/** The body relative to the pivot as grid coordinates (cell centres on the integers), jittered. */
+function onGrid(body: Float64Array, grid: Grid3): Float64Array {
+  const { dx, offset } = grid
+  const p = new Float64Array(body.length)
+  for (let i = 0; i < body.length; i += 3)
+    for (let a = 0; a < 3; a++) p[i + a] = (body[i + a] + offset[a]) / dx - 0.5 + JITTER[a]
+  return p
+}
+
 /**
  * Voxels of the body (relative to the pivot, as `turnBody` gives it) on a
  * grid whose pivot sits at `offset` (metres from the chamber's corner): one
@@ -124,10 +142,8 @@ export type Grid3 = { nx: number; ny: number; nz: number; dx: number; offset: Ve
  * only); otherwise the majority of x, y and z.
  */
 export function voxelize(body: Float64Array, indices: Uint32Array, grid: Grid3, closed: boolean): Uint8Array<ArrayBuffer> {
-  const { nx, ny, nz, dx, offset } = grid
-  const p = new Float64Array(body.length)
-  for (let i = 0; i < body.length; i += 3)
-    for (let a = 0; a < 3; a++) p[i + a] = (body[i + a] + offset[a]) / dx - 0.5 + JITTER[a]
+  const { nx, ny, nz } = grid
+  const p = onGrid(body, grid)
   const size = [nx, ny, nz]
   const n = nx * ny * nz
   const axes: (0 | 1 | 2)[] = closed ? [2] : [0, 1, 2]
@@ -206,4 +222,138 @@ export function voxelFrontalArea(voxels: Uint8Array, nx: number, ny: number, nz:
         }
     }
   return count
+}
+
+/** Words of a wall record, and the index of a cell without one (the solver's layout, shaders.ts). */
+export const WALL_WORDS = 5
+export const NO_WALL = 0xffffffff
+
+/**
+ * The body's walls for the solver (SPEC §24.8): per cell an index into
+ * `count` records of WALL_WORDS words, NO_WALL for none; byte k − 1 of a
+ * record (four to a word) is the wall on the link from the cell to x − c_k,
+ * at q = b / 255 of the link (b ≥ 1), or none (b = 0).
+ */
+export type WallLinks = { index: Uint32Array<ArrayBuffer>; q: Uint32Array<ArrayBuffer>; count: number }
+
+/** A wall distance (fraction of the link, 0..1) as a byte, 1..255 (the reference's quantize). */
+export function quantizeQ(q: number): number {
+  return Math.min(255, Math.max(1, Math.floor(q * 255 + 0.5)))
+}
+
+/** Walls from (cell, direction, byte) triples; a later triple of a link replaces an earlier one. */
+export function packWalls(cells: number, triples: ArrayLike<number>): WallLinks {
+  const index = new Uint32Array(cells).fill(NO_WALL)
+  let count = 0
+  for (let i = 0; i < triples.length; i += 3) if (index[triples[i]] === NO_WALL) index[triples[i]] = count++
+  const q = new Uint32Array(Math.max(1, count) * WALL_WORDS)
+  for (let i = 0; i < triples.length; i += 3) {
+    const [cell, k, b] = [triples[i], triples[i + 1], triples[i + 2]]
+    const w = WALL_WORDS * index[cell] + ((k - 1) >> 2)
+    const shift = 8 * ((k - 1) & 3)
+    q[w] = ((q[w] & ~(255 << shift)) | (b << shift)) >>> 0
+  }
+  return { index, q, count }
+}
+
+/** No walls: halfway bounce-back on every solid cell. */
+export function noWalls(cells: number): WallLinks {
+  return { index: new Uint32Array(cells).fill(NO_WALL), q: new Uint32Array(WALL_WORDS), count: 0 }
+}
+
+/**
+ * The walls of the body (relative to the pivot, as `turnBody` gives it) on the
+ * grid of its `voxels`: every link between two cell centres that crosses a
+ * triangle is a wall for each of its fluid ends, at the crossing nearest to
+ * it. A solid neighbour whose link meets no triangle (a voxel of an open mesh,
+ * decided by majority) is left to the solver's halfway bounce-back.
+ */
+export function wallLinks(body: Float64Array, indices: Uint32Array, grid: Grid3, voxels: Uint8Array): WallLinks {
+  const { nx, ny, nz } = grid
+  const n = nx * ny * nz
+  const size = [nx, ny, nz]
+  const p = onGrid(body, grid)
+  // Nearest crossing per (cell, direction), 2 = none; a record per cell that has one.
+  const slot = new Int32Array(n).fill(-1)
+  let best = new Float32Array(Q * 1024).fill(2)
+  let count = 0
+  const record = (cell: number, k: number, t: number) => {
+    let r = slot[cell]
+    if (r < 0) {
+      r = slot[cell] = count++
+      if (Q * count > best.length) {
+        const grown = new Float32Array(2 * best.length).fill(2)
+        grown.set(best)
+        best = grown
+      }
+    }
+    const i = Q * r + k
+    if (t < best[i]) best[i] = t
+  }
+  // One direction of each opposite pair: the link from x to x − c_k.
+  const dirs = Array.from({ length: Q }, (_, k) => k).filter((k) => k > 0 && OPPOSITE[k] > k)
+  const lo = [0, 0, 0]
+  const hi = [0, 0, 0]
+  const r0 = [0, 0, 0]
+  const r1 = [0, 0, 0]
+  for (let t = 0; t < indices.length; t += 3) {
+    const a = 3 * indices[t]
+    const b = 3 * indices[t + 1]
+    const c = 3 * indices[t + 2]
+    for (let i = 0; i < 3; i++) {
+      lo[i] = Math.min(p[a + i], p[b + i], p[c + i])
+      hi[i] = Math.max(p[a + i], p[b + i], p[c + i])
+    }
+    const e1x = p[b] - p[a], e1y = p[b + 1] - p[a + 1], e1z = p[b + 2] - p[a + 2]
+    const e2x = p[c] - p[a], e2y = p[c + 1] - p[a + 1], e2z = p[c + 2] - p[a + 2]
+    for (const k of dirs) {
+      const d = [-C[3 * k], -C[3 * k + 1], -C[3 * k + 2]]
+      // x and x + d both in the grid, and the segment x → x + d able to reach the triangle's box.
+      let empty = false
+      for (let i = 0; i < 3; i++) {
+        r0[i] = Math.max(0, -d[i], Math.ceil(lo[i] + Math.min(0, -d[i]) - 1e-9))
+        r1[i] = Math.min(size[i] - 1, size[i] - 1 - d[i], Math.floor(hi[i] + Math.max(0, -d[i]) + 1e-9))
+        if (r0[i] > r1[i]) empty = true
+      }
+      if (empty) continue
+      // Möller–Trumbore with the segment x + s d, s in [0, 1].
+      const px = d[1] * e2z - d[2] * e2y
+      const py = d[2] * e2x - d[0] * e2z
+      const pz = d[0] * e2y - d[1] * e2x
+      const det = e1x * px + e1y * py + e1z * pz
+      if (det === 0) continue
+      const inv = 1 / det
+      const step = d[0] + nx * (d[1] + ny * d[2])
+      for (let z = r0[2]; z <= r1[2]; z++)
+        for (let y = r0[1]; y <= r1[1]; y++)
+          for (let x = r0[0]; x <= r1[0]; x++) {
+            const tx = x - p[a], ty = y - p[a + 1], tz = z - p[a + 2]
+            const u = (tx * px + ty * py + tz * pz) * inv
+            if (u < 0 || u > 1) continue
+            const qx = ty * e1z - tz * e1y
+            const qy = tz * e1x - tx * e1z
+            const qz = tx * e1y - ty * e1x
+            const v = (d[0] * qx + d[1] * qy + d[2] * qz) * inv
+            if (v < 0 || u + v > 1) continue
+            const s = (e2x * qx + e2y * qy + e2z * qz) * inv
+            if (s < 0 || s > 1) continue
+            const cell = x + nx * (y + ny * z)
+            if (!voxels[cell]) record(cell, k, s)
+            if (!voxels[cell + step]) record(cell + step, OPPOSITE[k], 1 - s)
+          }
+    }
+  }
+  const index = new Uint32Array(n).fill(NO_WALL)
+  const q = new Uint32Array(Math.max(1, count) * WALL_WORDS)
+  for (let cell = 0; cell < n; cell++) {
+    const r = slot[cell]
+    if (r < 0) continue
+    index[cell] = r
+    for (let k = 1; k < Q; k++) {
+      const v = best[Q * r + k]
+      if (v > 1) continue
+      q[WALL_WORDS * r + ((k - 1) >> 2)] |= quantizeQ(v) << (8 * ((k - 1) & 3))
+    }
+  }
+  return { index, q, count }
 }

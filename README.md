@@ -69,8 +69,13 @@ Lattice Boltzmann in WebGPU compute shaders, half a million to four million cell
 movable rake, particles, a cut plane coloured by speed or Cp, and Cp on the model's surface, seen
 from a free camera (drag to orbit, right button or Shift to pan, wheel to zoom, double click to
 go back). Speed, fluid, floor, resolution and the model's yaw and pitch restart the flow; the
-views and the camera never touch it. It needs WebGPU (Chrome on this machine has it): without,
-the page says so and the rest of the program works as before.
+views and the camera never touch it. The body's walls sit where its surface really is inside
+each cell (interpolated bounce-back), so parts thinner than a cell still exist for the flow; key
+7 shows the body as cubes, as the grid sees it. On the right: Cd, Cl and the side force Cs of the
+whole body, corrected for the chamber's blockage, with the forces in newtons; «Salva studio»
+keeps them with the 3D mean field (exported as VTK for ParaView), three pictures and a PDF
+report, and 3D studies compare with each other. It needs WebGPU (Chrome on this machine has
+it): without, the page says so and the rest of the program works as before.
 
 ### Studies and exports
 

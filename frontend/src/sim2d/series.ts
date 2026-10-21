@@ -38,6 +38,12 @@ export type SeriesOptions = {
   /** Reference length in cells and lattice velocity, for the Strouhal number. */
   lLat: number
   uLat: number
+  /**
+   * The coefficients that may oscillate with the shedding; the one with the
+   * larger deviation is analysed. Default Cl; the 3D tunnel adds its side
+   * force (in the cm slot), since a body at zero yaw sheds sideways.
+   */
+  shedding?: ('cl' | 'cm')[]
 }
 
 export const CONVERGED_CHANGE = 0.005
@@ -127,7 +133,7 @@ export function dominantFrequency(
 }
 
 /** Samples resampled every `every` steps by linear interpolation (gaps are possible). */
-function even(samples: readonly CoefSample[], every: number, key: 'cd' | 'cl'): number[] {
+function even(samples: readonly CoefSample[], every: number, key: 'cd' | 'cl' | 'cm'): number[] {
   const out: number[] = []
   if (samples.length < 2) return out
   let j = 0
@@ -216,10 +222,12 @@ export class CoefficientSeries {
     let regime: SeriesStats['regime'] = null
     let strouhal: number | null = null
     let change: number | null = null
-    const oscillates = cl.std > MIN_OSCILLATION
+    const keys = this.options.shedding ?? ['cl']
+    const key = keys.reduce((a, b) => (({ cl, cm })[b].std > ({ cl, cm })[a].std ? b : a))
+    const oscillates = ({ cl, cm })[key].std > MIN_OSCILLATION
     const toSteps = this.options.uLat / this.options.lLat
     const band: [number, number] = [STROUHAL_BAND[0] * toSteps, STROUHAL_BAND[1] * toSteps]
-    const peak = oscillates && span >= 2 * tc ? dominantFrequency(even(used, every, 'cl'), every, band) : null
+    const peak = oscillates && span >= 2 * tc ? dominantFrequency(even(used, every, key), every, band) : null
     if (peak && peak.ratio > PEAK_OVER_NOISE && peak.frequency > 0) {
       regime = 'periodic'
       strouhal = (peak.frequency * this.options.lLat) / this.options.uLat

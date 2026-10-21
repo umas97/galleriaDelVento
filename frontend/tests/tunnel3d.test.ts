@@ -3,11 +3,26 @@
 //
 // The 3D tunnel's views without a GPU (SPEC §24, Phase 7b): the camera, where
 // the drawn model sits (it must coincide with the voxels the flow sees), the
-// rake, the points the colour ranges are read at, the ranges, and the page's
-// side of the geometry thread.
+// rake, the points the colour ranges are read at, the ranges, the voxels'
+// surface («Mostra i voxel», SPEC §24.8) and the page's side of the geometry
+// thread.
 import { describe, expect, it } from 'vitest'
 import { OrbitCamera, lookAt, multiply, perspective, transform, type Vec3 } from '../src/sim3d/camera'
-import { apply, autoRange, hexColor, modelMatrix, planePoints, rakeNozzles, rotationMatrix, surfacePoints, vertexNormals } from '../src/sim3d/scene'
+import {
+  apply,
+  autoRange,
+  hexColor,
+  modelMatrix,
+  planePoints,
+  rakeNozzles,
+  rotationMatrix,
+  surfacePoints,
+  vertexNormals,
+  voxelSurface,
+} from '../src/sim3d/scene'
+import type { CasePlan3D, CaseSetup3D } from '../src/lib/types'
+import { pointUpload3d } from '../src/tunnel/study3d'
+import type { Engine3DResult } from '../src/sim3d/engine'
 import { VoxelClient, type FromVoxelWorker, type ToVoxelWorker, type WorkerLike } from '../src/sim3d/voxelProtocol'
 import { boxOf, turnBody, voxelize } from '../src/sim3d/voxelize'
 import { ahmedBody, bboxCentre, uvSphere } from './synthetic'
@@ -122,6 +137,40 @@ describe('the drawn model sits where the voxels are', () => {
     expect(outside).toBe(0)
   })
 
+  it('the voxels drawn («Mostra i voxel») are the cells, outer faces only, facing out', () => {
+    // Two solid cells side by side along x, and one alone: 10 + 6 faces.
+    const plan = { nx: 6, ny: 4, nz: 4, dx: 0.1, offset: [0.3, 0.2, 0.2], yaw_deg: 35, pitch_deg: -10 } as unknown as CasePlan3D
+    const voxels = new Uint8Array(6 * 4 * 4)
+    const at = (x: number, y: number, z: number) => x + 6 * (y + 4 * z)
+    voxels[at(1, 1, 1)] = voxels[at(2, 1, 1)] = voxels[at(4, 2, 2)] = 1
+    const pivot: Vec3 = [5, -2, 1]
+    const mesh = voxelSurface(voxels, plan, pivot)
+    expect(mesh.indices.length).toBe(16 * 6)
+    // The model's matrix takes the vertices back to the cell corners in the chamber.
+    const m = modelMatrix(pivot, plan.offset, plan.yaw_deg, plan.pitch_deg)
+    const r = rotationMatrix(plan.yaw_deg, plan.pitch_deg)
+    for (let i = 0; i < mesh.positions.length / 3; i++) {
+      const q = apply(m, [mesh.positions[3 * i], mesh.positions[3 * i + 1], mesh.positions[3 * i + 2]])
+      q.forEach((v) => expect(Math.abs(v / plan.dx - Math.round(v / plan.dx))).toBeLessThan(1e-4))
+    }
+    // Every face looks out of its cell: its centre plus half a cell along the normal is fluid.
+    for (let f = 0; f < mesh.indices.length / 6; f++) {
+      const corners = [0, 1, 2, 3].map((k) => apply(m, Array.from(mesh.positions.subarray(3 * (4 * f + k), 3 * (4 * f + k) + 3)) as Vec3))
+      const centre = [0, 1, 2].map((i) => corners.reduce((a, c) => a + c[i], 0) / 4)
+      const n = apply(r, Array.from(mesh.normals.subarray(3 * 4 * f, 3 * 4 * f + 3)) as Vec3, 0)
+      const out = centre.map((v, i) => Math.floor((v + 0.5 * plan.dx * n[i]) / plan.dx))
+      const inn = centre.map((v, i) => Math.floor((v - 0.5 * plan.dx * n[i]) / plan.dx))
+      expect(voxels[at(out[0], out[1], out[2])] ?? 0).toBe(0)
+      expect(voxels[at(inn[0], inn[1], inn[2])]).toBe(1)
+      // Anticlockwise seen from outside: (b − a) × (c − a) along the normal.
+      const [a, b, c] = corners
+      const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]]
+      const v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]]
+      const cross = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]]
+      expect(cross[0] * n[0] + cross[1] * n[1] + cross[2] * n[2]).toBeGreaterThan(0)
+    }
+  })
+
   it('vertex normals point outward on a closed mesh', () => {
     const sphere = uvSphere(1, 24, 48)
     const n = vertexNormals(sphere.positions, sphere.indices)
@@ -224,5 +273,57 @@ describe('geometry thread client', () => {
     expect(v.voxels.reduce((s, x) => s + x, 0)).toBeGreaterThan(0)
     await expect(client.voxels(0, 0, { nx: 2000, ny: 1, nz: 1, dx: 1, offset: [0, 0, 0] }, true)).rejects.toThrow('troppo grande')
     expect(new Set(w.sent.map((m) => m.id)).size).toBe(w.sent.length)
+  })
+})
+
+describe('a 3D result for a study (SPEC §24.2 #7)', () => {
+  const plan = { blockage_correction: 0.8 } as unknown as CasePlan3D
+  const setup = {} as CaseSetup3D
+  const stats = {
+    status: 'converged' as const,
+    regime: 'steady' as const,
+    cd: { mean: 0.4, std: 0.01 },
+    cl: { mean: -0.1, std: 0.02 },
+    cm: { mean: 0.05, std: 0.005 },
+    clcd: null,
+    strouhal: null,
+    change: 0.002,
+    averagedSteps: 1600.4,
+  }
+  const result: Engine3DResult = {
+    step: 4000,
+    unstable: false,
+    stats,
+    rhoInf: 1.0002,
+    history: [
+      { step: 8, cd: 0.4, cl: -0.1, cm: 0.05 },
+      { step: 16, cd: Number.NaN, cl: 0, cm: 0 },
+    ],
+    mean: { sums: new Float32Array(4), samples: 10, rhoInf: 1.0001 },
+    voxels: new Uint8Array(1),
+  }
+  const ctx = { setup, plan, elapsedSeconds: 3, lines: [], box: [0, 0, 0, 1, 1, 1], options: {} as never, sequential: 'viridis' as const, diverging: 'coolwarm' as const }
+
+  it('keeps the corrected numbers, the measured Cd and Cs from the side-force slot', () => {
+    const up = pointUpload3d(result, ctx)
+    expect(up.dimension).toBe('3d')
+    expect(up.status).toBe('converged')
+    expect(up.coefficients.cd).toEqual({ mean: 0.4, std: 0.01 })
+    expect(up.coefficients.cd_measured!.mean).toBeCloseTo(0.5, 12)
+    expect(up.coefficients.cs).toEqual({ mean: 0.05, std: 0.005 })
+    expect(up.coefficients.blockage_correction).toBe(0.8)
+    expect(up.coefficients.averaged_steps).toBe(1600)
+    // No NaN reaches the server.
+    expect(up.history.step).toEqual([8])
+    expect(up.history.cs).toEqual([0.05])
+    expect(up.mean).toEqual({ samples: 10, rho_inf: 1.0001 })
+  })
+
+  it('an unstable case has no numbers and no mean field', () => {
+    const up = pointUpload3d({ ...result, unstable: true }, ctx)
+    expect(up.status).toBe('unstable')
+    expect(up.coefficients.cd).toBeNull()
+    expect(up.coefficients.cd_measured).toBeNull()
+    expect(up.mean).toBeNull()
   })
 })

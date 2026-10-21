@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // The D3Q19 solver on WebGPU (SPEC §24.3): two population buffers ping-ponged
-// by the fused step, the body as a bit mask, and the measurements -- forces by
+// by the fused step, the body as a bit mask with its interpolated walls
+// (SPEC §24.8), and the measurements -- forces by
 // momentum exchange, NaNs, the density range and ρ∞ through a reduction --
 // read back without stalling (every 8 steps, as in 2D). It consumes lattice
 // numbers only: they come from the 3D planner (SPEC §4, decision 4);
@@ -11,6 +12,7 @@ import type { CasePlan3D } from '../lib/types'
 import { Q } from './lattice3d.generated'
 import { shaderModule, type Gpu } from './gpu'
 import { PARAMS_SIZE, PARAMS_STRIDE, RECORD_BYTES, WORKGROUP, measureShader, reduceShader, stepShader } from './shaders'
+import { noWalls, type WallLinks } from './voxelize'
 
 export type LatticeParams3D = {
   nx: number
@@ -127,11 +129,11 @@ async function compile(device: GPUDevice): Promise<Compiled> {
   const layouts = {
     step: device.createBindGroupLayout({
       label: 'passo',
-      entries: [params(true), storage(1, true), storage(2, false), storage(3, true), storage(4, true)],
+      entries: [params(true), storage(1, true), storage(2, false), storage(3, true), storage(4, true), storage(6, true), storage(7, true)],
     }),
     measure: device.createBindGroupLayout({
       label: 'misura',
-      entries: [params(false), storage(1, true), storage(3, true), storage(5, false)],
+      entries: [params(false), storage(1, true), storage(3, true), storage(5, false), storage(6, true), storage(7, true), storage(8, false)],
     }),
     reduce: device.createBindGroupLayout({
       label: 'riduzione',
@@ -159,7 +161,11 @@ export class Solver3D {
   private readonly device: GPUDevice
   private readonly pops: [GPUBuffer, GPUBuffer]
   private readonly mask: GPUBuffer
+  private readonly wallIndex: GPUBuffer
+  private readonly wallQ: GPUBuffer
   private readonly inlet: GPUBuffer
+  /** Sums of (δρ, ux, uy, uz) per cell over the samples of the time averages. */
+  private readonly sums: GPUBuffer
   private readonly params: GPUBuffer
   private readonly stepGroups: [GPUBindGroup, GPUBindGroup]
   private readonly measureGroups: [GPUBindGroup, GPUBindGroup]
@@ -172,11 +178,17 @@ export class Solver3D {
   private finished: Sample3D[] = []
   /** Bumped by restart(): samples of an older run are dropped. */
   private epoch = 0
+  /** Samples in the time averages; their ρ∞, summed. */
+  meanSamples = 0
+  private meanRho = 0
+  private lastRhoInf = 1
+  private accumulating = false
 
   private constructor(
     gpu: Gpu,
     readonly lattice: LatticeParams3D,
     voxels: Uint32Array<ArrayBuffer>,
+    walls: WallLinks,
     private readonly pipelines: { step: GPUComputePipeline; measure: GPUComputePipeline; reduce: GPUComputePipeline },
     layouts: { step: GPUBindGroupLayout; measure: GPUBindGroupLayout; reduce: GPUBindGroupLayout },
   ) {
@@ -193,6 +205,11 @@ export class Solver3D {
     ]
     this.mask = device.createBuffer({ label: 'maschera', size: voxels.byteLength, usage: storage })
     device.queue.writeBuffer(this.mask, 0, voxels)
+    this.wallIndex = device.createBuffer({ label: 'pareti', size: walls.index.byteLength, usage: storage })
+    device.queue.writeBuffer(this.wallIndex, 0, walls.index)
+    this.wallQ = device.createBuffer({ label: 'pareti q', size: Math.max(16, walls.q.byteLength), usage: storage })
+    device.queue.writeBuffer(this.wallQ, 0, walls.q)
+    this.sums = device.createBuffer({ label: 'medie', size: this.cells * 16, usage: storage })
     const shape = inletShape3D(p)
     this.inlet = device.createBuffer({ label: 'ingresso', size: Math.max(16, shape.byteLength), usage: storage })
     device.queue.writeBuffer(this.inlet, 0, shape)
@@ -225,6 +242,8 @@ export class Solver3D {
           { binding: 2, resource: binding(this.pops[1 - i]) },
           { binding: 3, resource: binding(this.mask) },
           { binding: 4, resource: binding(this.inlet) },
+          { binding: 6, resource: binding(this.wallIndex) },
+          { binding: 7, resource: binding(this.wallQ) },
         ],
       }),
     ) as [GPUBindGroup, GPUBindGroup]
@@ -242,6 +261,9 @@ export class Solver3D {
           { binding: 1, resource: binding(this.pops[i]) },
           { binding: 3, resource: binding(this.mask) },
           { binding: 5, resource: binding(this.partials[0]) },
+          { binding: 6, resource: binding(this.wallIndex) },
+          { binding: 7, resource: binding(this.wallQ) },
+          { binding: 8, resource: binding(this.sums) },
         ],
       }),
     ) as [GPUBindGroup, GPUBindGroup]
@@ -269,18 +291,24 @@ export class Solver3D {
       })
   }
 
-  static async create(gpu: Gpu, lattice: LatticeParams3D, voxels: Uint32Array<ArrayBuffer>): Promise<Solver3D> {
+  /** `walls`: the body's interpolated walls (SPEC §24.8); none = halfway bounce-back. */
+  static async create(
+    gpu: Gpu,
+    lattice: LatticeParams3D,
+    voxels: Uint32Array<ArrayBuffer>,
+    walls: WallLinks = noWalls(lattice.nx * lattice.ny * lattice.nz),
+  ): Promise<Solver3D> {
     let compiled = PIPELINES.get(gpu.device)
     if (!compiled) PIPELINES.set(gpu.device, (compiled = compile(gpu.device)))
     const { pipelines, layouts } = await compiled
-    return new Solver3D(gpu, lattice, voxels, pipelines, layouts)
+    return new Solver3D(gpu, lattice, voxels, walls, pipelines, layouts)
   }
 
-  private fillParams(view: DataView, u: number, count: number, rowStride: number): void {
+  private fillParams(view: DataView, u: number, count: number, rowStride: number, accumulate = false): void {
     const p = this.lattice
     const ints = [p.nx, p.ny, p.nz, this.cells, rowStride, GROUND[p.ground], p.spongeStart, count]
     ints.forEach((v, i) => view.setUint32(4 * i, v, true))
-    const floats = [p.tau, u, p.spongeFactor, p.spongeDamping, smagorinskyFactor(p.cs), 0, 0, 0]
+    const floats = [p.tau, u, p.spongeFactor, p.spongeDamping, smagorinskyFactor(p.cs), accumulate ? 1 : 0, 0, 0]
     floats.forEach((v, i) => view.setFloat32(32 + 4 * i, v, true))
   }
 
@@ -321,11 +349,21 @@ export class Solver3D {
     }
   }
 
-  /** Start a measurement of the current state; false when every read-back buffer is busy. */
-  measure(): boolean {
+  /**
+   * Start a measurement of the current state; false when every read-back
+   * buffer is busy. `accumulate`: the state also joins the time averages (it
+   * does even when the read-back has to be skipped).
+   */
+  measure(accumulate = false): boolean {
     const reader = this.readers.find((r) => !r.busy)
-    if (!reader) return false
+    if (!reader && !accumulate) return false
     const device = this.device
+    if (accumulate !== this.accumulating) {
+      this.accumulating = accumulate
+      const view = new DataView(new ArrayBuffer(PARAMS_SIZE))
+      this.fillParams(view, 0, this.cells, this.cellDispatch.rowStride, accumulate)
+      device.queue.writeBuffer(this.params, PARAMS_STRIDE * BATCH, view)
+    }
     const encoder = device.createCommandEncoder({ label: 'misura' })
     const pass = encoder.beginComputePass()
     pass.setPipeline(this.pipelines.measure)
@@ -337,6 +375,14 @@ export class Solver3D {
       pass.dispatchWorkgroups(level.dispatch.x, level.dispatch.y)
     }
     pass.end()
+    if (accumulate) {
+      this.meanSamples++
+      this.meanRho += this.lastRhoInf
+    }
+    if (!reader) {
+      device.queue.submit([encoder.finish()])
+      return false
+    }
     encoder.copyBufferToBuffer(this.finalPartial, 0, reader.buffer, 0, RECORD_BYTES)
     device.queue.submit([encoder.finish()])
     reader.busy = true
@@ -350,6 +396,7 @@ export class Solver3D {
         reader.busy = false
         if (epoch !== this.epoch) return
         const rhoInf = d[7] > 0 ? d[6] / d[7] : 1
+        this.lastRhoInf = rhoInf
         this.finished.push({
           step,
           // Relative to the undisturbed pressure (see measureShader).
@@ -381,6 +428,38 @@ export class Solver3D {
     await this.device.queue.onSubmittedWorkDone()
   }
 
+  /** Mean ρ∞ over the samples of the time averages (the normalisation of their Cp). */
+  get meanRhoInf(): number {
+    return this.meanSamples ? this.meanRho / this.meanSamples : this.lastRhoInf
+  }
+
+  /** The time averages start again (a change that keeps the flow). */
+  clearMean(): void {
+    const encoder = this.device.createCommandEncoder()
+    encoder.clearBuffer(this.sums)
+    this.device.queue.submit([encoder.finish()])
+    this.meanSamples = 0
+    this.meanRho = 0
+  }
+
+  /** The sums of (δρ, ux, uy, uz) per cell (16 bytes a cell; divide by meanSamples). */
+  async readMean(): Promise<Float32Array<ArrayBuffer>> {
+    const device = this.device
+    const size = this.cells * 16
+    const staging = device.createBuffer({ label: 'medie lette', size, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST })
+    const encoder = device.createCommandEncoder()
+    encoder.copyBufferToBuffer(this.sums, 0, staging, 0, size)
+    device.queue.submit([encoder.finish()])
+    try {
+      await staging.mapAsync(GPUMapMode.READ)
+      const out = new Float32Array(staging.getMappedRange().slice(0))
+      staging.unmap()
+      return out
+    } finally {
+      staging.destroy()
+    }
+  }
+
   /** The populations of the current state (tests and exports: 76 bytes a cell). */
   async readPopulations(): Promise<Float32Array> {
     const device = this.device
@@ -399,15 +478,17 @@ export class Solver3D {
   /** Back to a fluid at rest, step 0. */
   restart(): void {
     const encoder = this.device.createCommandEncoder()
-    for (const b of this.pops) encoder.clearBuffer(b)
+    for (const b of [...this.pops, this.sums]) encoder.clearBuffer(b)
     this.device.queue.submit([encoder.finish()])
     this.finished = []
     this.epoch++
     this.step = 0
+    this.meanSamples = 0
+    this.meanRho = 0
   }
 
   dispose(): void {
-    for (const b of [...this.pops, this.mask, this.inlet, this.params, ...this.partials]) b.destroy()
+    for (const b of [...this.pops, this.mask, this.wallIndex, this.wallQ, this.inlet, this.sums, this.params, ...this.partials]) b.destroy()
     for (const r of this.readers) r.buffer.destroy()
     this.readers = []
   }

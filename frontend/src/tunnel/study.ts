@@ -60,8 +60,8 @@ function wrap(ctx: CanvasRenderingContext2D, lines: string[], width: number): st
   return out
 }
 
-/** A view with its legend and the conditions in a band underneath (SPEC §2.3). */
-export function composeView(image: HTMLCanvasElement, map: ColorMap, legend: { title: string; range: [number, number] }, conditions: string[]): HTMLCanvasElement {
+/** A view with its legend (if it has one) and the conditions in a band underneath (SPEC §2.3). */
+export function composeView(image: HTMLCanvasElement, map: ColorMap, legend: { title: string; range: [number, number] } | null, conditions: string[]): HTMLCanvasElement {
   const size = Math.max(12, Math.round(image.width / 70))
   const pad = Math.round(size * 0.8)
   const lineHeight = Math.round(size * 1.45)
@@ -76,16 +76,19 @@ export function composeView(image: HTMLCanvasElement, map: ColorMap, legend: { t
   ctx.fillRect(0, 0, out.width, out.height)
   ctx.drawImage(image, 0, 0)
   let y = image.height + pad
-  const barWidth = Math.min(out.width - 2 * pad, size * 20)
-  for (let x = 0; x < barWidth; x++) {
-    ctx.fillStyle = colorAt(map, x / Math.max(1, barWidth - 1))
-    ctx.fillRect(pad + x, y, 1, size)
-  }
   ctx.fillStyle = '#d4d4d4'
   ctx.font = `${size}px sans-serif`
   ctx.textBaseline = 'top'
-  const digits = digitsFor(legend.range)
-  ctx.fillText(`${legend.title}: ${num(legend.range[0], digits)} … ${num(legend.range[1], digits)}`, pad * 2 + barWidth, y)
+  if (legend) {
+    const barWidth = Math.min(out.width - 2 * pad, size * 20)
+    for (let x = 0; x < barWidth; x++) {
+      ctx.fillStyle = colorAt(map, x / Math.max(1, barWidth - 1))
+      ctx.fillRect(pad + x, y, 1, size)
+    }
+    ctx.fillStyle = '#d4d4d4'
+    const digits = digitsFor(legend.range)
+    ctx.fillText(`${legend.title}: ${num(legend.range[0], digits)} … ${num(legend.range[1], digits)}`, pad * 2 + barWidth, y)
+  }
   y += size + pad
   for (const line of lines) {
     ctx.fillText(line, pad, y)

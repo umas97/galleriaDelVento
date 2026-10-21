@@ -5,10 +5,11 @@
 // (mesh.bin, received once as a transferred buffer) and answers, for the
 // case's rotations, what the planner sizes the chamber on -- the turned body's
 // box about the pivot and its frontal area -- and then the voxels on the
-// plan's grid. The turned body of the last rotations is kept: the voxels of a
+// plan's grid, with the walls where the links meet the surface (SPEC §24.8).
+// The turned body of the last rotations is kept: the voxels of a
 // plan come right after its body.
 import { parseMesh } from '../lib/meshBinary'
-import { boxOf, frontalArea, turnBody, voxelFrontalArea, voxelize, type Vec3 } from './voxelize'
+import { boxOf, frontalArea, turnBody, voxelFrontalArea, voxelize, wallLinks, type Vec3 } from './voxelize'
 import type { FromVoxelWorker, ToVoxelWorker } from './voxelProtocol'
 
 let positions: Float32Array | null = null
@@ -47,7 +48,12 @@ function handle(message: ToVoxelWorker): void {
       const body = bodyAt(message.yaw, message.pitch)
       const g = message.grid
       const voxels = voxelize(body, indices!, g, message.closed)
-      post({ type: 'voxels', id: message.id, voxels, frontalCells: voxelFrontalArea(voxels, g.nx, g.ny, g.nz) }, [voxels.buffer])
+      const walls = wallLinks(body, indices!, g, voxels)
+      post({ type: 'voxels', id: message.id, voxels, walls, frontalCells: voxelFrontalArea(voxels, g.nx, g.ny, g.nz) }, [
+        voxels.buffer,
+        walls.index.buffer,
+        walls.q.buffer,
+      ])
       return
     }
   }

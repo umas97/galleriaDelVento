@@ -5,7 +5,8 @@
 // the pictures taken when it was saved, the mean fields, history and Cp, and
 // for a series its points and curves; name and notes, every export (SPEC
 // §11.5), the report, deletion. A study of a newer version is shown, never
-// written (SPEC §14.2).
+// written (SPEC §14.2). A study of the 3D tunnel (SPEC §24.2 #7) shows its
+// whole body's numbers and pictures, and exports history, VTK, JSON and PDF.
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from 'react-router-dom'
@@ -14,9 +15,10 @@ import { ErrorNotice } from '../components/ErrorNotice'
 import { ApiError, api } from '../lib/api'
 import { bytes, num } from '../lib/format'
 import { useSetSetting, useSettings } from '../lib/settings'
-import type { Study, StudyEnvelope } from '../lib/types'
+import { is3d, type Study, type StudyEnvelope } from '../lib/types'
 import { sectionOf, studyStatus } from '../study/present'
 import { CoefficientsTable, ConditionsTable, MeanFields, PointCharts, STATUS_TONE, SectionStrip, SeriesCharts, Warnings } from '../study/StudyParts'
+import { Point3D } from '../study/Study3D'
 import { t, type MessageKey } from '../i18n/it'
 
 /** Back to the library, on the studies tab. */
@@ -146,7 +148,16 @@ function StudyView({ envelope }: { envelope: StudyEnvelope }) {
       <section className="space-y-2 rounded-lg border border-ink-700 bg-ink-850 p-3" data-testid="study-exports">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-semibold text-ink-50">{t('study.export')}</span>
-          {result ? (
+          {result && is3d(result) ? (
+            <>
+              <Button disabled={!!exporting} onClick={() => void exportPoint('csv', `points/${k}/history.csv${sep}`)}>
+                {t('study.export.history')}
+              </Button>
+              <Button disabled={!!exporting || !result.fields.length} onClick={() => void exportPoint('vti', `points/${k}/fields.vti`)}>
+                {t('study.export.vti3d')}
+              </Button>
+            </>
+          ) : result ? (
             <>
               <Button disabled={!!exporting} onClick={() => void exportPoint('csv', `points/${k}/history.csv${sep}`)}>
                 {t('study.export.history')}
@@ -222,16 +233,18 @@ function StudyView({ envelope }: { envelope: StudyEnvelope }) {
             </thead>
             <tbody>
               {study.points.map((p, i) => {
-                const c = p.result.coefficients
+                const r = p.result
+                if (is3d(r)) return null
+                const c = r.coefficients
                 return (
                   <tr key={i} className={`cursor-pointer border-t border-ink-700 ${i === k ? 'bg-ink-800' : 'hover:bg-ink-850'}`} onClick={() => setK(i)}>
                     <td className="py-1">{series.parameter === 'depth' ? `${num(100 * (p.value ?? 0), 1)}%` : num(p.value ?? 0, 2)}</td>
-                    <td className={STATUS_TONE[p.result.status]}>{t(`tunnel.status.${p.result.status}` as MessageKey)}</td>
+                    <td className={STATUS_TONE[r.status]}>{t(`tunnel.status.${r.status}` as MessageKey)}</td>
                     <td className="font-mono">{c.cd ? num(c.cd.mean, 4) : '—'}</td>
                     <td className="font-mono">{c.cl ? num(c.cl.mean, 4) : '—'}</td>
                     <td className="font-mono">{c.cm ? num(c.cm.mean, 4) : '—'}</td>
                     <td className="font-mono">{c.strouhal !== null ? num(c.strouhal, 3) : '—'}</td>
-                    <td>{p.result.plan.texts.reynolds}</td>
+                    <td>{r.plan.texts.reynolds}</td>
                   </tr>
                 )
               })}
@@ -243,7 +256,8 @@ function StudyView({ envelope }: { envelope: StudyEnvelope }) {
       ) : null}
       {series && !study.points.length ? <p className="text-ink-300">{t('study.noPoints')}</p> : null}
 
-      {result && point ? (
+      {result && point && is3d(result) ? <Point3D studyId={study.id} k={k} point={point} result={result} /> : null}
+      {result && point && !is3d(result) ? (
         <section className="space-y-4" data-testid="study-point">
           {series ? <h3 className="font-semibold text-ink-50">{t('study.point', { n: k + 1 })}</h3> : null}
           <Warnings result={result} />

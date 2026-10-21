@@ -11,9 +11,13 @@
 // State: two storage buffers of populations (deviations from the rest
 // weights, post-collision), ping-ponged, laid out direction by direction:
 // f[k * n + cell] with cell = x + nx * (y + ny * z). The body is a bit mask,
-// 32 cells to a word.
+// 32 cells to a word. Its walls (SPEC §24.8): per cell an index into records
+// of five words (NO_WALL: none), each holding one byte per direction k = 1..18
+// -- the link from the cell to its source x − c_k has a wall at q = b / 255
+// (b ≥ 1), or none (b = 0) -- byte k − 1 of the record, four to a word.
 import { C, M, MINV, MIRROR, OPPOSITE, Q, S_E, S_EPS, S_M, S_PI, S_Q, W } from './lattice3d.generated'
 import { wgslFloat } from './gpu'
+import { NO_WALL, WALL_WORDS } from './voxelize'
 
 /** Threads per workgroup of every kernel. */
 export const WORKGROUP = 128
@@ -45,7 +49,8 @@ struct Params {
   nx: u32, ny: u32, nz: u32, n: u32,
   rowStride: u32, ground: u32, spongeStart: u32, count: u32,
   tau0: f32, u: f32, spongeFactor: f32, damping: f32,
-  smag: f32, pad0: f32, pad1: f32, pad2: f32,
+  // accumulate: 1 adds this state to the time averages (measure kernel only)
+  smag: f32, accumulate: f32, pad1: f32, pad2: f32,
 }
 `
 
@@ -56,6 +61,56 @@ export const PARAMS_STRIDE = 256
 const SOLID = `
 fn solid(c: u32) -> bool { return (mask[c >> 5u] & (1u << (c & 31u))) != 0u; }
 `
+
+/** The cell's wall record in wq0..wq4 (zeros: no wall on any link). */
+const WALL_LOAD = `
+  var wq0 = 0u; var wq1 = 0u; var wq2 = 0u; var wq3 = 0u; var wq4 = 0u;
+  let wi = wallIndex[cell];
+  if (wi != ${NO_WALL}u) {
+    let wb0 = ${WALL_WORDS}u * wi;
+    wq0 = wallQ[wb0]; wq1 = wallQ[wb0 + 1u]; wq2 = wallQ[wb0 + 2u]; wq3 = wallQ[wb0 + 3u]; wq4 = wallQ[wb0 + 4u];
+  }
+`
+
+/** The byte of direction k (1..18) in the loaded record. */
+const wallByte = (k: number) => `((wq${(k - 1) >> 2} >> ${8 * ((k - 1) & 3)}u) & 255u)`
+
+/**
+ * f_k(x) from a wall on the link to x − c_k, as the reference's _wall (Bouzidi,
+ * linear; SPEC §24.8), into `target`; `qb` is that link's byte, `a` the
+ * expression of f*_k̄(x) (the halfway value).
+ */
+function wallPop(k: number, target: string, qb: string, a = `src[${OPPOSITE[k]}u * n + cell]`): string {
+  const kb = OPPOSITE[k]
+  const [ax, ay, az] = [cx(k), cy(k), cz(k)]
+  const conds: string[] = []
+  if (ax === 1) conds.push('x + 1 < nx')
+  if (ax === -1) conds.push('x > 0')
+  if (ay === 1) conds.push('y + 1 < ny')
+  if (ay === -1) conds.push('y > 0')
+  if (az === 1) conds.push('z + 1 < nz')
+  if (az === -1) conds.push('z > 0')
+  const ff = `u32(i32(cell) + ${ax} + nx * (${ay} + ny * (${az})))`
+  return `{
+      let fa = ${a};
+      if (${qb} == 0u) { ${target} = fa; } else {
+        let q = f32(${qb}) / 255.0;
+        if (q < 0.5) {
+          ${target} = fa;
+          if (${conds.join(' && ')}) {
+            let ff = ${ff};
+            if (!solid(ff) && ${wallByte(kb)} == 0u) {
+              let q2 = 2.0 * q;
+              ${target} = q2 * fa + (1.0 - q2) * src[${kb}u * n + ff];
+            }
+          }
+        } else {
+          let r = 1.0 / (2.0 * q);
+          ${target} = r * fa + (1.0 - r) * src[${k}u * n + cell];
+        }
+      }
+    }`
+}
 
 function feqLines(): string {
   // feq − w for every direction, as the reference's _feq_dev (same operations).
@@ -97,7 +152,8 @@ function gather(k: number): string {
   if (az !== 0) flips.push(`${indent}if (sz < 0 || sz >= nz) { fl = fl | 2u; sz = z; }`)
   if (flips.length) L.push(`${indent}var fl = 0u;`, ...flips)
   L.push(`${indent}let s = u32(sx + nx * (sy + ny * sz));`)
-  L.push(`${indent}if (solid(s)) { g${k} = ${opp}; } else {`)
+  // A wall: halfway here, interpolated after the gather (wallsLate) where the link has its q.
+  L.push(`${indent}if (solid(s) || ${wallByte(k)} != 0u) { g${k} = ${opp}; } else {`)
   if (flips.length) {
     const options = [1, 2, 3].filter((fl) => (fl & 1 ? ay !== 0 : true) && (fl & 2 ? az !== 0 : true))
     L.push(`${indent}  var kk = ${k}u;`)
@@ -108,6 +164,19 @@ function gather(k: number): string {
   }
   L.push(`${indent}}`)
   if (az === 1) L.push('    }')
+  L.push('  }')
+  return L.join('\n')
+}
+
+/**
+ * The interpolated walls (SPEC §24.8), out of the gather's way: only a cell
+ * with a wall record goes through them, the others keep their halfway values.
+ */
+function wallsLate(): string {
+  const L = [`  if (wi != ${NO_WALL}u) {`]
+  for (let k = 1; k < Q; k++) {
+    L.push(`    if (${wallByte(k)} != 0u) ${wallPop(k, `g${k}`, wallByte(k), `g${k}`)}`)
+  }
   L.push('  }')
   return L.join('\n')
 }
@@ -140,6 +209,8 @@ export function stepShader(): string {
 @group(0) @binding(2) var<storage, read_write> dst: array<f32>;
 @group(0) @binding(3) var<storage, read> mask: array<u32>;
 @group(0) @binding(4) var<storage, read> inlet: array<f32>;
+@group(0) @binding(6) var<storage, read> wallIndex: array<u32>;
+@group(0) @binding(7) var<storage, read> wallQ: array<u32>;
 ${TABLES}
 ${SOLID}
 ${feqLines()}
@@ -170,7 +241,9 @@ ${all((k) => `      drho += src[${k}u * n + cell + 1u];`)}
     return;
   }
   // --- stream (pull) with the boundaries ---
+${WALL_LOAD}
 ${all(gather)}
+${wallsLate()}
   // --- collide (MRT + Smagorinsky) ---
 ${moments()}
   let drho = m0;
@@ -275,7 +348,9 @@ const REDUCE_ARGS = `@builtin(global_invocation_id) gid: vec3<u32>,
 
 /**
  * Per-cell terms of the measurement (SPEC §9.5, §24.3), reduced per workgroup:
- * momentum exchange on the body links, NaNs, the density range of the fluid
+ * momentum exchange on the body links -- f*_k(x) out to the wall and the
+ * population the next step brings back, c_k (2 w_k + f*_k(x) + f_k̄(x, t + 1)),
+ * as the reference's _forces (SPEC §24.8) -- NaNs, the density range of the fluid
  * and the density of plane x = 1 (the undisturbed ρ∞).
  *   a = (Fx, Fy, Fz, NaN count)   b = (min ρ, max ρ, Σρ plane 1, cells plane 1)
  *   c = (Σ 2 w_k c_k over the same links, 0)
@@ -283,6 +358,10 @@ const REDUCE_ARGS = `@builtin(global_invocation_id) gid: vec3<u32>,
  * for a body surrounded by fluid, not for one standing on the floor, whose
  * underside is not wetted. The force relative to the undisturbed pressure is
  * a − ρ∞ c (SPEC §9.5).
+ *
+ * With P.accumulate set it also adds (δρ, ux, uy, uz) of every fluid cell to
+ * the time averages in `acc` (SPEC §24.2 #7: the mean field of a study), in
+ * the same pass that reads the populations anyway.
  */
 export function measureShader(): string {
   const links: string[] = []
@@ -296,8 +375,17 @@ export function measureShader(): string {
     if (az === 1) conds.push('z + 1 < nz')
     if (az === -1) conds.push('z > 0')
     const offset = `${ax} + nx * (${ay} + ny * (${az}))`
+    const kb = OPPOSITE[k]
     links.push(
-      `    if (${conds.join(' && ')}) { if (solid(u32(i32(cell) + ${offset}))) { force += 2.0 * (${f(W[k])} + g${k}) * CV[${k}]; rest += ${f(2 * W[k])} * CV[${k}]; } }`,
+      `    if (${conds.join(' && ')}) {
+      let qb = ${wallByte(kb)};
+      if (solid(u32(i32(cell) + ${offset})) || qb != 0u) {
+        var back = 0.0;
+        ${wallPop(kb, 'back', 'qb')}
+        force += (${f(Math.fround(2 * W[k]))} + g${k} + back) * CV[${k}];
+        rest += ${f(2 * W[k])} * CV[${k}];
+      }
+    }`,
     )
   }
   return `${PARAMS}
@@ -305,6 +393,9 @@ export function measureShader(): string {
 @group(0) @binding(1) var<storage, read> src: array<f32>;
 @group(0) @binding(3) var<storage, read> mask: array<u32>;
 @group(0) @binding(5) var<storage, read_write> out: array<vec4<f32>>;
+@group(0) @binding(6) var<storage, read> wallIndex: array<u32>;
+@group(0) @binding(7) var<storage, read> wallQ: array<u32>;
+@group(0) @binding(8) var<storage, read_write> acc: array<vec4<f32>>;
 ${TABLES}
 ${SOLID}
 ${SHARED}
@@ -326,7 +417,12 @@ fn main(${REDUCE_ARGS}) {
     let y = i32(t % P.ny);
     let z = i32(t / P.ny);
 ${Array.from({ length: Q }, (_, k) => `    let g${k} = src[${k}u * n + cell];`).join('\n')}
+${WALL_LOAD}
     let rho = 1.0 + (${Array.from({ length: Q }, (_, k) => `g${k}`).join(' + ')});
+    if (P.accumulate > 0.5) {
+      let j = ${Array.from({ length: Q }, (_, k) => `g${k} * CV[${k}]`).join(' + ')};
+      acc[cell] = acc[cell] + vec4<f32>(rho - 1.0, j / rho);
+    }
     var force = vec3<f32>(0.0);
     var rest = vec3<f32>(0.0);
 ${links.join('\n')}

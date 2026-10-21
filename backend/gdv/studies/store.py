@@ -10,6 +10,9 @@
     studi/<uuid>/punti/<k>/...        ... or, for a series, each point's
     studi/<uuid>/miniatura.png
 
+A 3D result (SPEC §24.2 #7) has the same files but the contour; its history
+holds Cs instead of Cm and its fields are 3D (``result.py``).
+
 Everything is written atomically through the write guard. A series is created
 empty and grows a point at a time, as the GPU finishes them (SPEC §11.3, §13):
 ``studio.json`` is rewritten after the point's files are in place, so a crash
@@ -35,15 +38,18 @@ from pydantic import BaseModel, ValidationError
 from .. import safety
 from ..config import get_settings
 from ..errors import AppError, NewerSchemaError
-from ..physics.coefficients import Coefficients, real_forces
+from ..physics.coefficients import Coefficients, Coefficients3D, real_forces, real_forces3d
 from . import fields as field_files
 from .result import (
     SCHEMA_VERSION,
     VIEW_NAMES,
     ContourCpRef,
     FieldRef,
+    FieldRef3D,
     PointUpload,
+    PointUpload3D,
     SimulationResult,
+    SimulationResult3D,
     Study,
     StudyMeta,
     StudyPoint,
@@ -58,6 +64,7 @@ _log = logging.getLogger(__name__)
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 MAX_VIEW_BYTES = 16 * 1024 * 1024
 FIELD_NAMES = ("u", "v", "cp", "vorticity")
+FIELD_NAMES_3D = ("u", "v", "w", "cp")
 CONTOUR_FLOATS = ("xc", "s", "cp", "x", "y")
 
 
@@ -65,7 +72,7 @@ CONTOUR_FLOATS = ("xc", "s", "cp", "x", "y")
 class PointParts:
     """A finished case as the interface sends it: the JSON, the field sums, the pictures."""
 
-    upload: PointUpload
+    upload: PointUpload | PointUpload3D
     fields: bytes | None = None
     views: dict[str, bytes] = field(default_factory=dict)
 
@@ -81,6 +88,14 @@ def _npz(**arrays: np.ndarray) -> bytes:
     buffer = io.BytesIO()
     np.savez_compressed(buffer, **arrays)
     return buffer.getvalue()
+
+
+def _raw_dimension(raw: dict[str, Any]) -> Literal["2d", "3d"]:
+    """A study we cannot read in full is 3D if its first result says so."""
+    points = raw.get("points") or [{}]
+    first = points[0] if isinstance(points[0], dict) else {}
+    result = first.get("result") if isinstance(first.get("result"), dict) else {}
+    return "3d" if result.get("dimension") == "3d" else "2d"
 
 
 def _png(data: bytes, what: str) -> bytes:
@@ -180,6 +195,7 @@ class StudyStore:
                 profile_name=str(raw.get("profile_name", "")),
                 model_id=None,
                 model_name=None,
+                dimension=_raw_dimension(raw),
                 cd=None,
                 cl=None,
                 reynolds="",
@@ -201,6 +217,7 @@ class StudyStore:
         first = s.points[0].result if s.points else None
         single = first if s.kind == "single" else None
         return StudySummary(
+            dimension=first.dimension if first else "2d",
             id=s.id,
             name=s.name,
             kind=s.kind,
@@ -229,22 +246,30 @@ class StudyStore:
         return points[k]
 
     def history(self, study_id: str, k: int) -> dict[str, np.ndarray]:
-        ref = self.point(study_id, k).result.history
-        with np.load(self._file(study_id, ref.file)) as data:
-            return {name: data[name] for name in ("step", "cd", "cl", "cm")}
+        """``step``, ``cd``, ``cl`` and ``cm`` (2D) or ``cs`` (3D)."""
+        result = self.point(study_id, k).result
+        names = ("step", "cd", "cl", "cs" if result.dimension == "3d" else "cm")
+        with np.load(self._file(study_id, result.history.file)) as data:
+            return {name: data[name] for name in names}
 
     def contour(self, study_id: str, k: int) -> dict[str, np.ndarray]:
-        ref = self.point(study_id, k).result.contour_cp
+        result = self.point(study_id, k).result
+        if isinstance(result, SimulationResult3D):
+            raise FileNotFoundError("un risultato 3D non ha contorno")
+        ref = result.contour_cp
         with np.load(self._file(study_id, ref.file)) as data:
             return {name: data[name] for name in ("xc", "s", "upper", "cp", "x", "y")}
 
-    def fields(self, study_id: str, k: int) -> tuple[list[FieldRef], dict[str, np.ndarray]]:
+    def fields(
+        self, study_id: str, k: int
+    ) -> tuple[list[FieldRef] | list[FieldRef3D], dict[str, np.ndarray]]:
         """The field references of point ``k`` and the stored arrays (with ``solid``)."""
         refs = self.point(study_id, k).result.fields
         if not refs:
             raise FileNotFoundError("questo risultato non ha campi medi")
+        names = FIELD_NAMES_3D if isinstance(refs[0], FieldRef3D) else FIELD_NAMES
         with np.load(self._file(study_id, refs[0].file)) as data:
-            arrays = {name: data[name] for name in (*FIELD_NAMES, "solid")}
+            arrays = {name: data[name] for name in (*names, "solid")}
         return refs, arrays
 
     def view_path(self, study_id: str, k: int, name: str) -> Path:
@@ -272,8 +297,92 @@ class StudyStore:
             raise NewerSchemaError(f"studio {study_id}")
         return envelope.study
 
+    def _views(self, base: Path, rel: str, parts: PointParts) -> list[str]:
+        views: list[str] = []
+        for name, data in parts.views.items():
+            if name not in VIEW_NAMES:
+                raise AppError("Immagine dello studio sconosciuta", name)
+            safety.make_dirs(base / f"{rel}viste")
+            safety.atomic_write_bytes(base / f"{rel}viste/{name}.png", _png(data, name))
+            views.append(name)
+        return sorted(views, key=VIEW_NAMES.index)
+
+    def _write_point3d(self, study: Study, k: int, parts: PointParts) -> StudyPoint:
+        """Point ``k`` of a 3D result (SPEC §24.2 #7): history, mean field, pictures."""
+        up = parts.upload
+        assert isinstance(up, PointUpload3D)
+        base = self.folder(study.id)
+        rel = self.point_dir(study, k)
+        safety.make_dirs(base / rel if rel else base)
+        unstable = up.status == "unstable"
+        c = up.coefficients
+        coefficients = (
+            Coefficients3D(
+                cd=None,
+                cl=None,
+                cs=None,
+                cd_measured=None,
+                blockage_correction=c.blockage_correction,
+                regime=None,
+                change=None,
+                averaged_steps=c.averaged_steps,
+                rho_inf=c.rho_inf,
+            )
+            if unstable
+            else c
+        )
+        h = up.history
+        safety.atomic_write_bytes(
+            base / f"{rel}storia.npz",
+            _npz(
+                step=np.asarray(h.step, dtype=np.int64),
+                cd=np.asarray(h.cd, dtype=np.float32),
+                cl=np.asarray(h.cl, dtype=np.float32),
+                cs=np.asarray(h.cs, dtype=np.float32),
+            ),
+        )
+        refs: list[FieldRef3D] = []
+        if parts.fields is not None and up.mean is not None and not unstable:
+            plan = up.plan
+            sums, mask = field_files.decode3d(parts.fields, plan.nx, plan.ny, plan.nz)
+            arrays = field_files.normalise3d(sums, mask, up.mean.samples, up.mean.rho_inf, plan)
+            safety.atomic_write_bytes(base / f"{rel}campi.npz", _npz(**arrays))
+            for name, (unit, scale) in field_files.scales3d(plan).items():
+                refs.append(
+                    FieldRef3D(
+                        file=f"{rel}campi.npz",
+                        key=name,
+                        name=name,  # type: ignore[arg-type]
+                        unit=unit,
+                        scale=scale,
+                        nx=plan.nx,
+                        ny=plan.ny,
+                        nz=plan.nz,
+                        dx=plan.dx,
+                        samples=up.mean.samples,
+                    )
+                )
+        result = SimulationResult3D(
+            case=up.case,
+            plan=up.plan,
+            status=up.status,
+            coefficients=coefficients,
+            forces_real=real_forces3d(coefficients, up.plan),
+            history=TimeSeriesRef(file=f"{rel}storia.npz", samples=len(h.step), every=h.every),
+            fields=refs,
+        )
+        return StudyPoint(
+            value=None,
+            result=result,
+            steps=up.steps,
+            elapsed_s=up.elapsed_s,
+            views=self._views(base, rel, parts),  # type: ignore[arg-type]
+        )
+
     def _write_point(self, study: Study, k: int, parts: PointParts) -> StudyPoint:
         """Write point ``k``'s files and return its StudyPoint (not yet in the study)."""
+        if isinstance(parts.upload, PointUpload3D):
+            return self._write_point3d(study, k, parts)
         up = parts.upload
         base = self.folder(study.id)
         rel = self.point_dir(study, k)
@@ -338,13 +447,6 @@ class StudyStore:
                         samples=up.mean.samples,
                     )
                 )
-        views: list[str] = []
-        for name, data in parts.views.items():
-            if name not in VIEW_NAMES:
-                raise AppError("Immagine dello studio sconosciuta", name)
-            safety.make_dirs(base / f"{rel}viste")
-            safety.atomic_write_bytes(base / f"{rel}viste/{name}.png", _png(data, name))
-            views.append(name)
         result = SimulationResult(
             case=up.case,
             plan=up.plan,
@@ -360,7 +462,7 @@ class StudyStore:
             result=result,
             steps=up.steps,
             elapsed_s=up.elapsed_s,
-            views=sorted(views, key=VIEW_NAMES.index),  # type: ignore[arg-type]
+            views=self._views(base, rel, parts),  # type: ignore[arg-type]
         )
 
     def create(
@@ -369,6 +471,8 @@ class StudyStore:
         """A single study (with its one point) or an empty series."""
         if meta.series is None and point is None:
             raise AppError("Uno studio singolo richiede un risultato", "nessun punto")
+        if meta.series is not None and point is not None and point.upload.dimension == "3d":
+            raise AppError("La galleria 3D non fa serie", "studio 3D con serie")
         now = datetime.now(UTC)
         series = meta.series.model_copy(update={"state": "running"}) if meta.series else None
         study = Study(
@@ -408,6 +512,8 @@ class StudyStore:
             study = self._writable(study_id)
             if study.kind != "series" or study.series is None:
                 raise AppError("Solo una serie riceve nuovi punti", f"studio {study.kind}")
+            if point.upload.dimension == "3d":
+                raise AppError("La galleria 3D non fa serie", "punto 3D in una serie")
             if study.series.state != "running":
                 raise AppError("La serie è già conclusa", study.series.state, status=409)
             k = len(study.points)
@@ -488,15 +594,13 @@ class StudyStore:
         """The whole study without the fields: results, histories, Cp along the contour."""
         study = self.study(study_id)
         points = []
-        for k in range(len(study.points)):
+        for k, point in enumerate(study.points):
             h = self.history(study_id, k)
-            c = self.contour(study_id, k)
-            points.append(
-                {
-                    "history": {key: value.tolist() for key, value in h.items()},
-                    "contour": {key: value.tolist() for key, value in c.items()},
-                }
-            )
+            data: dict[str, Any] = {"history": {key: value.tolist() for key, value in h.items()}}
+            if point.result.dimension == "2d":
+                c = self.contour(study_id, k)
+                data["contour"] = {key: value.tolist() for key, value in c.items()}
+            points.append(data)
         return {
             "formato": self.EXPORT_FORMAT,
             "versione": SCHEMA_VERSION,
@@ -528,14 +632,27 @@ class StudyStore:
                 rel = self.point_dir(study, k)
                 safety.make_dirs(base / rel if rel else base)
                 h = data_k["history"]
-                c = data_k["contour"]
+                three = isinstance(point.result, SimulationResult3D)
+                names = ("cd", "cl", "cs") if three else ("cd", "cl", "cm")
                 safety.atomic_write_bytes(
                     base / f"{rel}storia.npz",
                     _npz(
                         step=np.asarray(h["step"], dtype=np.int64),
-                        **{n: np.asarray(h[n], dtype=np.float32) for n in ("cd", "cl", "cm")},
+                        **{n: np.asarray(h[n], dtype=np.float32) for n in names},
                     ),
                 )
+                if three:
+                    result3d = point.result.model_copy(
+                        update={
+                            "fields": [],
+                            "history": point.result.history.model_copy(
+                                update={"file": f"{rel}storia.npz"}
+                            ),
+                        }
+                    )
+                    study.points.append(point.model_copy(update={"result": result3d, "views": []}))
+                    continue
+                c = data_k["contour"]
                 safety.atomic_write_bytes(
                     base / f"{rel}contorno.npz",
                     _npz(

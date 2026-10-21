@@ -20,18 +20,31 @@ points at them (paths relative to the study's folder):
 A study is one result (``single``) or a series of them (``series``, SPEC
 §11.3). A series point lives in ``punti/<k>/`` with the same files; points are
 written as they finish, so a crash loses nothing that was done.
+
+A result of the 3D tunnel (SPEC §24.2 #7) is the same contract's 3D variant,
+:class:`SimulationResult3D` (``dimension = "3d"``; a 2D result says "2d", or
+nothing in the files written before): ``CaseSetup3D`` and ``CasePlan3D``, the
+whole body's coefficients, and
+
+* ``storia.npz``   ``step``, ``cd``, ``cl``, ``cs`` (corrected, SPEC §24.6);
+* ``campi.npz``    ``u``, ``v``, ``w`` on V and ``cp``, float16, shape
+  (nz, ny, nx), x fastest, and ``solid`` (the voxels).
+
+It has no contour; its pictures are the view as the user left it, the
+longitudinal plane and the Cp on the surface. A 3D study is always single.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, model_validator
 
 from .. import __version__
-from ..physics.coefficients import Coefficients, Forces
+from ..physics.coefficients import Coefficients, Coefficients3D, Forces, Forces3D
 from ..physics.planner import CasePlan, CaseSetup
+from ..physics.planner3d import CasePlan3D, CaseSetup3D
 
 __all__ = [
     "SCHEMA_VERSION",
@@ -39,12 +52,18 @@ __all__ = [
     "ContourCpRef",
     "ContourData",
     "FieldRef",
+    "FieldRef3D",
     "HistoryData",
+    "HistoryData3D",
     "MeanData",
     "PointUpload",
+    "PointUpload3D",
+    "AnyPointUpload",
+    "AnyResult",
     "SeriesParameter",
     "SeriesSpec",
     "SimulationResult",
+    "SimulationResult3D",
     "Study",
     "StudyMeta",
     "StudyPoint",
@@ -56,9 +75,12 @@ __all__ = [
 SCHEMA_VERSION = 1
 
 #: The instantaneous pictures saved with a result (SPEC §11.2): speed, Cp,
-#: vorticity, smoke if it was on; for a model's section, the mini-scene with the plane.
-ViewName = Literal["velocita", "cp", "vorticita", "fumo", "modello"]
-VIEW_NAMES: tuple[str, ...] = ("velocita", "cp", "vorticita", "fumo", "modello")
+#: vorticity, smoke if it was on; for a model's section, the mini-scene with the
+#: plane. A 3D result: the view as it was, the longitudinal plane, Cp on the surface.
+ViewName = Literal["velocita", "cp", "vorticita", "fumo", "modello", "vista", "piano", "superficie"]
+VIEW_NAMES: tuple[str, ...] = (
+    "velocita", "cp", "vorticita", "fumo", "modello", "vista", "piano", "superficie",
+)  # fmt: skip
 Status = Literal["converged", "provisional", "unstable"]
 SeriesParameter = Literal["angle", "speed", "depth"]
 
@@ -85,6 +107,22 @@ class FieldRef(BaseModel):
     samples: int
 
 
+class FieldRef3D(BaseModel):
+    """A mean field of a 3D result: (nz, ny, nx), x fastest; real value ``stored · scale``."""
+
+    file: str
+    key: str
+    name: Literal["u", "v", "w", "cp"]
+    unit: str
+    scale: float
+    nx: int
+    ny: int
+    nz: int
+    #: Cell size, metres; cell (i, j, k) has its centre at ((i, j, k) + ½)·dx in the chamber.
+    dx: float
+    samples: int
+
+
 class ContourCpRef(BaseModel):
     file: str
     points: int
@@ -97,6 +135,7 @@ class SimulationResult(BaseModel):
 
     model_config = ConfigDict(allow_inf_nan=False)
 
+    dimension: Literal["2d"] = "2d"
     case: CaseSetup
     plan: CasePlan
     status: Status
@@ -110,12 +149,42 @@ class SimulationResult(BaseModel):
     schema_version: int = SCHEMA_VERSION
 
 
+class SimulationResult3D(BaseModel):
+    """One case of the 3D tunnel as it ran (SPEC §24.2 #7): the contract's 3D variant."""
+
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    dimension: Literal["3d"] = "3d"
+    case: CaseSetup3D
+    plan: CasePlan3D
+    status: Status
+    coefficients: Coefficients3D
+    forces_real: Forces3D
+    history: TimeSeriesRef
+    fields: list[FieldRef3D]
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    app_version: str = __version__
+    schema_version: int = SCHEMA_VERSION
+
+
+def _dimension(value: Any) -> str:
+    """Files written before the 3D tunnel have no ``dimension``: they are 2D."""
+    found = value.get("dimension") if isinstance(value, dict) else getattr(value, "dimension", None)
+    return "3d" if found == "3d" else "2d"
+
+
+AnyResult = Annotated[
+    Annotated[SimulationResult, Tag("2d")] | Annotated[SimulationResult3D, Tag("3d")],
+    Discriminator(_dimension),
+]
+
+
 class StudyPoint(BaseModel):
     """A result in a study; for a series, with the value of the swept parameter."""
 
     #: Incidence (°), speed (m/s) or depth (fraction) for a series point; None otherwise.
     value: float | None
-    result: SimulationResult
+    result: AnyResult
     #: Steps the solver ran, from rest.
     steps: int
     elapsed_s: float
@@ -165,6 +234,8 @@ class StudySummary(BaseModel):
     profile_name: str
     model_id: str | None
     model_name: str | None
+    #: "3d": a study of the 3D tunnel.
+    dimension: Literal["2d", "3d"]
     #: Single study: mean Cd and Cl (None for a series or without numbers).
     cd: float | None
     cl: float | None
@@ -206,6 +277,24 @@ class HistoryData(BaseModel):
         return self
 
 
+class HistoryData3D(BaseModel):
+    """Cd, Cl and the side force Cs of the 3D tunnel, corrected (SPEC §24.6)."""
+
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    every: int = Field(gt=0)
+    step: list[int]
+    cd: list[float]
+    cl: list[float]
+    cs: list[float]
+
+    @model_validator(mode="after")
+    def _same_length(self) -> HistoryData3D:
+        if not len(self.step) == len(self.cd) == len(self.cl) == len(self.cs):
+            raise ValueError("serie storiche di lunghezza diversa")
+        return self
+
+
 class ContourData(BaseModel):
     model_config = ConfigDict(allow_inf_nan=False)
 
@@ -238,6 +327,7 @@ class MeanData(BaseModel):
 class PointUpload(BaseModel):
     model_config = ConfigDict(allow_inf_nan=False)
 
+    dimension: Literal["2d"] = "2d"
     value: float | None = None
     case: CaseSetup
     plan: CasePlan
@@ -249,3 +339,27 @@ class PointUpload(BaseModel):
     mean: MeanData | None
     steps: int = Field(ge=0)
     elapsed_s: float = Field(ge=0.0)
+
+
+class PointUpload3D(BaseModel):
+    """A finished 3D case as the interface sends it; the mean field comes as binary
+    (``studies/fields.py``: sums of δρ, ux, uy, uz per cell, then the voxels)."""
+
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    dimension: Literal["3d"] = "3d"
+    value: None = None
+    case: CaseSetup3D
+    plan: CasePlan3D
+    status: Status
+    coefficients: Coefficients3D
+    history: HistoryData3D
+    mean: MeanData | None
+    steps: int = Field(ge=0)
+    elapsed_s: float = Field(ge=0.0)
+
+
+AnyPointUpload = Annotated[
+    Annotated[PointUpload, Tag("2d")] | Annotated[PointUpload3D, Tag("3d")],
+    Discriminator(_dimension),
+]

@@ -20,11 +20,23 @@ x − c_k is not fluid:
   floor: free slip -- each component of c_k that crosses a wall changes sign
   and the source stays on this side, f_k(x) = f*_k'(x') -- and if that source
   is solid, bounce-back;
-- a solid cell (the body): halfway bounce-back, f_k(x) = f*_k̄(x);
+- a wall of the body on the link (a solid source, or a link that crosses the
+  surface between two fluid cells: a part thinner than a cell): the linear
+  interpolated bounce-back of Bouzidi, Firdaouss and Lallemand (2001), with q
+  the wall's distance from x as a fraction of the link (SPEC §24.8):
+  q < ½: f_k(x) = 2q f*_k̄(x) + (1 − 2q) f*_k̄(x + c_k), falling back to
+  halfway bounce-back when x + c_k is not a fluid cell reached by a free link;
+  q ≥ ½: f_k(x) = f*_k̄(x) / (2q) + (1 − 1/(2q)) f*_k(x). A solid source with no
+  known q (a voxel decided by majority) takes halfway bounce-back,
+  f_k(x) = f*_k̄(x), which is also the formula at q = ½;
 - beyond the outlet (last plane): zero gradient, the source plane is clamped;
 - the inlet plane (x = 0) is not collided: it holds the equilibrium at the
   inlet velocity with the density of its downstream neighbour (the sum of its
   populations).
+
+The walls come as one byte per cell and direction, ``walls[k, z, y, x]``: the
+link from x to its source x − c_k has a wall at q = b / 255 (b ≥ 1), or none
+(b = 0); see :func:`quantize`.
 
 The inlet velocity ramps up as U · ½(1 − cos(π t / T_ramp)), uniform or with
 the boundary-layer shape of its row. Over the outlet sponge the viscosity grows
@@ -124,9 +136,11 @@ class LatticeCase3D:
     sponge_damping: float = 0.05
     #: Smagorinsky constant; 0 switches the subgrid model off.
     cs: float = lattice3d.CS_SMAGORINSKY
+    #: Wall distances per link, uint8 (19, nz, ny, nx) (None = halfway bounce-back).
+    walls: np.ndarray | None = None
 
     @classmethod
-    def from_plan(cls, plan, mask: np.ndarray) -> LatticeCase3D:
+    def from_plan(cls, plan, mask: np.ndarray, walls: np.ndarray | None = None) -> LatticeCase3D:
         shape = None
         if plan.inlet_profile == "boundary_layer":
             shape = inlet_shape(plan.nz, plan.inlet_exponent, plan.inlet_reference_cells)
@@ -144,7 +158,42 @@ class LatticeCase3D:
             sponge_factor=plan.sponge_factor,
             sponge_damping=plan.sponge_damping,
             cs=plan.smagorinsky_cs,
+            walls=walls,
         )
+
+
+def quantize(q: np.ndarray) -> np.ndarray:
+    """Wall distances (fractions of a link, 0..1) as the solver's bytes: 1..255."""
+    return np.clip(np.floor(np.asarray(q, np.float64) * 255.0 + 0.5), 1, 255).astype(np.uint8)
+
+
+def sphere_walls(mask: np.ndarray, centre, radius: float) -> np.ndarray:
+    """The walls of a sphere (cells; cell i's centre at i + 0.5), exact: for every
+    fluid cell and direction, where the link to the source x − c_k first meets
+    the surface, if it does."""
+    nz, ny, nx = mask.shape
+    walls = np.zeros((Q, nz, ny, nx), np.uint8)
+    z, y, x = np.mgrid[0:nz, 0:ny, 0:nx] + 0.5
+    d = np.stack([x - centre[0], y - centre[1], z - centre[2]])
+    fluid = mask == 0
+    for k in range(1, Q):
+        c = np.array([_CX[k], _CY[k], _CZ[k]], np.float64)
+        # |d − t c|² = r²: t² |c|² − 2 t (d·c) + |d|² − r² = 0, nearest root in [0, 1].
+        a = c @ c
+        b = np.einsum("i,ijkl->jkl", c, d)
+        cc = (d * d).sum(axis=0) - radius * radius
+        disc = b * b - a * cc
+        root = np.sqrt(np.maximum(disc, 0.0))
+        t1 = (b - root) / a
+        t2 = (b + root) / a
+        t = np.where((t1 >= 0) & (t1 <= 1), t1, np.where((t2 >= 0) & (t2 <= 1), t2, np.inf))
+        sx = np.arange(nx)[None, None, :] - _CX[k]
+        sy = np.arange(ny)[None, :, None] - _CY[k]
+        sz = np.arange(nz)[:, None, None] - _CZ[k]
+        inside = (sx >= 0) & (sx < nx) & (sy >= 0) & (sy < ny) & (sz >= 0) & (sz < nz)
+        hit = fluid & inside & (disc >= 0) & np.isfinite(t)
+        walls[k][hit] = quantize(t[hit])
+    return walls
 
 
 def inlet_shape(nz: int, exponent: float, reference_cells: float) -> np.ndarray:
@@ -161,9 +210,31 @@ def _feq_dev(k, drho, ux, uy, uz, cx, cy, cz, w):
     return w[k] * (drho + rho * (F32(3.0) * cu + F32(4.5) * cu * cu - F32(1.5) * uu))
 
 
+@nb.njit(inline="always")
+def _wall(f, mask, walls, k, kb, qb, x, y, z, nx, ny, nz):
+    """f_k(x) from a wall on the link to x − c_k (Bouzidi, linear; SPEC §24.8)."""
+    a = f[kb, z, y, x]
+    if qb == 0:
+        return a
+    q = F32(qb) / F32(255.0)
+    if q < F32(0.5):
+        fx = x + _CX[k]
+        fy = y + _CY[k]
+        fz = z + _CZ[k]
+        if (
+            fx >= 0 and fx < nx and fy >= 0 and fy < ny and fz >= 0 and fz < nz
+            and not mask[fz, fy, fx] and walls[kb, z, y, x] == 0
+        ):  # fmt: skip
+            q2 = F32(2.0) * q
+            return q2 * a + (F32(1.0) - q2) * f[kb, fz, fy, fx]
+        return a
+    r = F32(1.0) / (F32(2.0) * q)
+    return r * a + (F32(1.0) - r) * f[k, z, y, x]
+
+
 @nb.njit(parallel=True)
 def _step(
-    f, out, mask, uin, tau0, wall_u, ground, sponge_start, sponge_factor, damping, cs,
+    f, out, mask, walls, uin, tau0, wall_u, ground, sponge_start, sponge_factor, damping, cs,
 ):  # fmt: skip
     nz, ny, nx = mask.shape
     cx = _CX
@@ -222,8 +293,9 @@ def _step(
                     if sz < 0 or sz >= nz:
                         flags |= 2
                         sz = z
-                    if mask[sz, sy, sx]:
-                        g[k] = f[opp[k], z, y, x]
+                    qb = walls[k, z, y, x]
+                    if mask[sz, sy, sx] or qb != 0:
+                        g[k] = _wall(f, mask, walls, k, opp[k], qb, x, y, z, nx, ny, nz)
                     else:
                         g[k] = f[mir[k, flags], sz, sy, sx]
                 # --- collide (MRT + Smagorinsky) ---
@@ -297,7 +369,7 @@ def _step(
 
 @nb.njit
 def _run(
-    f, f2, mask, shape, u_lat, ramp_steps, start, steps, tau0, ground, sponge_start,
+    f, f2, mask, walls, shape, u_lat, ramp_steps, start, steps, tau0, ground, sponge_start,
     sponge_factor, damping, cs,
 ):  # fmt: skip
     uin = np.empty(shape.shape[0], dtype=np.float32)
@@ -309,17 +381,24 @@ def _run(
         u = u_lat * F32(r)
         for z in range(uin.shape[0]):
             uin[z] = u * shape[z]
-        _step(f, f2, mask, uin, tau0, u, ground, sponge_start, sponge_factor, damping, cs)
+        _step(f, f2, mask, walls, uin, tau0, u, ground, sponge_start, sponge_factor, damping, cs)
         f, f2 = f2, f
     return f, f2
 
 
-@nb.njit(cache=True, parallel=True)
-def _forces(f, mask, cx, cy, cz, w):
+@nb.njit(parallel=True)
+def _forces(f, mask, walls, cx, cy, cz, w):
     """Momentum exchange on the body links, per z plane: Fx, Fy, Fz in lattice
     units, then Σ 2 w_k c_k over the same links (what a fluid at rest with unit
-    density would push: zero unless the body touches a wall or the floor)."""
+    density would push: zero unless the body touches a wall or the floor).
+
+    A link from x towards x + c_k is a wall link when that cell is solid or the
+    link crosses the surface; it carries f*_k(x) to the wall and brings back
+    the population the next step gives f_k̄(x) (:func:`_wall`), so its share is
+    c_k (2 w_k + f*_k(x) + f_k̄(x, t + 1)) -- 2 c_k (w_k + f*_k) with halfway
+    bounce-back."""
     nz, ny, nx = mask.shape
+    opp = _OPP
     out = np.zeros((nz, 6))
     for z in nb.prange(nz):
         for y in range(ny):
@@ -332,9 +411,12 @@ def _forces(f, mask, cx, cy, cz, w):
                     c = z + cz[k]
                     if a < 0 or a >= nx or b < 0 or b >= ny or c < 0 or c >= nz:
                         continue
-                    if not mask[c, b, a]:
+                    kb = opp[k]
+                    qb = walls[kb, z, y, x]
+                    if not mask[c, b, a] and qb == 0:
                         continue
-                    p = 2.0 * (float(w[k]) + float(f[k, z, y, x]))
+                    back = _wall(f, mask, walls, kb, k, qb, x, y, z, nx, ny, nz)
+                    p = float(F32(2.0) * w[k] + f[k, z, y, x] + back)
                     out[z, 0] += p * cx[k]
                     out[z, 1] += p * cy[k]
                     out[z, 2] += p * cz[k]
@@ -396,6 +478,12 @@ class Reference3D:
         nz, ny, nx = case.nz, case.ny, case.nx
         assert case.mask.shape == (nz, ny, nx)
         self.mask = np.ascontiguousarray(case.mask, dtype=np.uint8)
+        self.walls = (
+            np.zeros((Q, nz, ny, nx), np.uint8)
+            if case.walls is None
+            else np.ascontiguousarray(case.walls, dtype=np.uint8)
+        )
+        assert self.walls.shape == (Q, nz, ny, nx)
         self.f = np.zeros((Q, nz, ny, nx), dtype=F32)
         self._f2 = np.zeros_like(self.f)
         self.shape = (
@@ -410,6 +498,7 @@ class Reference3D:
             self.f,
             self._f2,
             self.mask,
+            self.walls,
             self.shape,
             F32(c.u_lat),
             c.ramp_steps,
@@ -428,7 +517,7 @@ class Reference3D:
         """Fx, Fy, Fz on the body, lattice units, relative to the undisturbed
         pressure ρ∞ / 3: a body standing on the floor is not pushed down by
         the pressure of the air at rest (SPEC §9.5)."""
-        sums = _forces(self.f, self.mask, _CX, _CY, _CZ, _W).sum(axis=0)
+        sums = _forces(self.f, self.mask, self.walls, _CX, _CY, _CZ, _W).sum(axis=0)
         rho = self.rho_inf()
         return tuple(float(sums[a] - rho * sums[3 + a]) for a in range(3))
 

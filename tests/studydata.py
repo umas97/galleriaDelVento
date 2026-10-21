@@ -154,3 +154,86 @@ def point(
 
 def meta(name: str = "Studio di prova", series: dict | None = None, **extra: Any) -> dict:
     return {"name": name, "notes": "", "profile_name": "NACA 0012", "series": series, **extra}
+
+
+# --- a 3D case (SPEC §24.2 #7) ------------------------------------------------------------
+
+
+def setup3d(*, speed: float = 20.0, yaw: float = 0.0, d: float = 0.2):
+    """A sphere of diameter d on its own in the 3D tunnel, Bozza."""
+    from gdv.physics.planner3d import CaseSetup3D
+
+    return CaseSetup3D(
+        model_id="sfera3d", name="Sfera", pivot=(0.0, 0.0, 0.5), model_size=(d, d, d),
+        body_box=(-d / 2, -d / 2, -d / 2, d / 2, d / 2, d / 2),
+        frontal_area_m2=float(np.pi * d * d / 4), speed=speed, yaw_deg=yaw, resolution="bozza",
+    )  # fmt: skip
+
+
+def field_sums3d(nx: int, ny: int, nz: int, u_lat: float) -> tuple[np.ndarray, np.ndarray]:
+    """Sums (nz, ny, nx, 4) of a known flow -- δρ = 0.003 x/L, u = U (1 + 0.1 x/L),
+    v = 0, w = 0.05 U z/H -- and a solid block."""
+    x = (np.arange(nx) + 0.5) / nx
+    z = (np.arange(nz) + 0.5) / nz
+    zz, _, xx = np.meshgrid(z, np.zeros(ny), x, indexing="ij")
+    mean = np.stack([0.003 * xx, u_lat * (1 + 0.1 * xx), np.zeros_like(xx), 0.05 * u_lat * zz], -1)
+    mask = np.zeros((nz, ny, nx), dtype=np.uint8)
+    mask[nz // 2 - 2 : nz // 2 + 2, ny // 2 - 2 : ny // 2 + 2, nx // 4 : nx // 4 + 4] = 1
+    return (mean * SAMPLES).astype(np.float32), mask
+
+
+def point3d(
+    *, speed: float = 20.0, yaw: float = 0.0, status: str = "converged", cd: float = 0.5
+) -> dict[str, Any]:
+    """A 3D point upload: the parts ``point``, ``fields`` and the three pictures."""
+    from gdv.physics.planner3d import plan3d
+
+    case = setup3d(speed=speed, yaw=yaw)
+    p = plan3d(case)
+    factor = p.blockage_correction
+    steps = list(range(8, 8 * 201, 8))
+    stat = lambda m: {"mean": m, "std": 0.002}  # noqa: E731
+    numbers = status != "unstable"
+    upload = {
+        "dimension": "3d",
+        "value": None,
+        "case": case.model_dump(mode="json"),
+        "plan": p.model_dump(mode="json"),
+        "status": status,
+        "coefficients": {
+            "cd": stat(cd) if numbers else None,
+            "cl": stat(0.01) if numbers else None,
+            "cs": stat(-0.02) if numbers else None,
+            "cd_measured": stat(cd / factor) if numbers else None,
+            "blockage_correction": factor,
+            "regime": "steady",
+            "change": 0.002,
+            "averaged_steps": 1600,
+            "rho_inf": 1.0003,
+        },
+        "history": {
+            "every": 8,
+            "step": steps,
+            "cd": [cd] * len(steps),
+            "cl": [0.01] * len(steps),
+            "cs": [-0.02] * len(steps),
+        },
+        "mean": {"samples": SAMPLES, "rho_inf": 1.0} if numbers else None,
+        "steps": 1600,
+        "elapsed_s": 12.0,
+    }
+    sums, mask = field_sums3d(p.nx, p.ny, p.nz, p.u_lat)
+    return {
+        "point": upload,
+        "fields": sums.astype("<f4").tobytes() + mask.tobytes(),
+        "vista": png(),
+        "piano": png(),
+        "superficie": png(),
+    }
+
+
+def meta3d(name: str = "Sfera 3D") -> dict:
+    return {
+        "name": name, "notes": "", "profile_id": None, "profile_name": "Sfera",
+        "model_id": "sfera3d", "model_name": "Sfera", "series": None,
+    }  # fmt: skip

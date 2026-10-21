@@ -25,7 +25,9 @@ them.
 cells: SPEC §24.3), and a cross-section with the same margin ``m`` on the
 sides and above (and below, without a floor) such that the frontal area blocks
 ``max_blockage`` of it (8%, 10% for vehicles), with at least half the body's
-largest size as margin. With a floor the body keeps its real height (and rests
+largest frontal size (width or height) as margin: a thin plate or a wing does
+not end up against the walls, while a long low body (a car) is not given a
+margin out of its length (SPEC §24.8). With a floor the body keeps its real height (and rests
 on the floor if a rotation takes it below); without, it sits in the middle.
 
 **Grid.** The preset fixes the number of cells, the aspect follows the chamber;
@@ -79,7 +81,7 @@ CELLS_3D: dict[str, int] = {"bozza": 500_000, "normale": 1_500_000, "fine": 4_00
 TAU_MIN_3D = 0.502
 UPSTREAM_3D = 1.5  # body lengths
 DOWNSTREAM_3D = 3.0
-#: Least margin around the body, as a fraction of its largest size.
+#: Least margin around the body, as a fraction of its largest frontal size.
 MARGIN_MIN = 0.5
 GRID_MULTIPLE_3D = 2
 GRID_MIN_3D = 16
@@ -168,6 +170,11 @@ class CasePlan3D(BaseModel):
     a_lat: float
     #: Frontal area over the chamber's cross-section.
     blockage: float
+    #: What the measured coefficients are multiplied by to be those of the body
+    #: in open air (SPEC §24.6): the continuity correction (1 − A/C)², with A the
+    #: reference area (the voxels' frontal area once known) -- the flow passes a
+    #: blocking body faster, at U / (1 − A/C).
+    blockage_correction: float
     #: Convective time T_c = L_ref / V, in steps (SPEC §9.4 #6).
     tc_steps: float
     ramp_steps: int
@@ -251,7 +258,7 @@ def plan3d(setup: CaseSetup3D) -> CasePlan3D:
     top = setup.pivot[2] + z1 - floor_level if setup.ground != "none" else tall
     margin = max(
         _margin(width, top, setup.frontal_area_m2, setup),
-        MARGIN_MIN * max(length, width, tall),
+        MARGIN_MIN * max(width, tall),
     )
     size = (
         (UPSTREAM_3D + 1.0 + DOWNSTREAM_3D) * length,
@@ -332,6 +339,7 @@ def plan3d(setup: CaseSetup3D) -> CasePlan3D:
         reference_area=area,
         a_lat=area / dx**2,
         blockage=setup.frontal_area_m2 / (chamber[1] * chamber[2]),
+        blockage_correction=(1.0 - min(area / (chamber[1] * chamber[2]), 0.5)) ** 2,
         tc_steps=tc_steps,
         ramp_steps=ramp,
         transient_steps=ramp + int(math.ceil(3 * tc_steps)),

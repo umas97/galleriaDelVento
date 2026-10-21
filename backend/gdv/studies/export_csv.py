@@ -53,17 +53,19 @@ def _write(
 
 
 def history_csv(study: Study, k: int, history: dict[str, np.ndarray], sep: Separator) -> bytes:
+    """Cd, Cl, Cm per sample; for a 3D result Cd, Cl, Cs, corrected for the blockage."""
     result = study.points[k].result
     dt = result.plan.dt
+    last = "cs" if "cs" in history else "cm"
     rows = zip(
         history["step"].tolist(),
         (history["step"] * dt).tolist(),
         history["cd"].tolist(),
         history["cl"].tolist(),
-        history["cm"].tolist(),
+        history[last].tolist(),
         strict=True,
     )
-    columns = ["passo", "tempo_s", "Cd", "Cl", "Cm"]
+    columns = ["passo", "tempo_s", "Cd", "Cl", last.capitalize()]
     return _write(conditions_lines(study, result), columns, rows, sep)
 
 

@@ -26,7 +26,7 @@ from typing import Any, Literal
 import numpy as np
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter
 from starlette.concurrency import run_in_threadpool
 
 from ..config import get_settings
@@ -34,7 +34,14 @@ from ..errors import AppError
 from ..studies import export_csv, export_vtk
 from ..studies.compare import MAX_COMPARED, Comparison, compare
 from ..studies.report import ReportTokens, render_pdf
-from ..studies.result import VIEW_NAMES, PointUpload, Study, StudyMeta, StudySummary
+from ..studies.result import (
+    VIEW_NAMES,
+    AnyPointUpload,
+    SimulationResult3D,
+    Study,
+    StudyMeta,
+    StudySummary,
+)
 from ..studies.store import PointParts, StudyEnvelope, StudyStore
 from ..window import find_browser
 from .routes_models import read_limited_body
@@ -89,8 +96,12 @@ def _json_part(parts: dict[str, bytes], name: str) -> Any:
         raise AppError("Dati dello studio danneggiati", f"{name}: {exc}") from exc
 
 
+_UPLOAD: TypeAdapter[Any] = TypeAdapter(AnyPointUpload)
+
+
 def _point(parts: dict[str, bytes]) -> PointParts:
-    upload = PointUpload.model_validate(_json_part(parts, "point"))
+    """A 2D or a 3D point (``dimension``; none means 2D)."""
+    upload = _UPLOAD.validate_python(_json_part(parts, "point"))
     return PointParts(
         upload=upload,
         fields=parts.get("fields"),
@@ -214,6 +225,8 @@ def point_fields(request: Request, study_id: str, k: int) -> Response:
     """
     refs, arrays = studies(request).fields(study_id, k)
     ref = refs[0]
+    if isinstance(studies(request).point(study_id, k).result, SimulationResult3D):
+        raise AppError("I campi 3D si esportano in VTK", "fields.bin è solo per il 2D")
     header = json.dumps(
         {
             "nx": ref.nx,
@@ -272,7 +285,10 @@ def fields_vti(request: Request, study_id: str, k: int) -> Response:
     store = studies(request)
     study = store.study(study_id)
     refs, arrays = store.fields(study_id, k)
-    data = export_vtk.fields_vti(study, k, refs, arrays)
+    if isinstance(study.points[k].result, SimulationResult3D):
+        data = export_vtk.fields_vti3d(study, k, refs, arrays)  # type: ignore[arg-type]
+    else:
+        data = export_vtk.fields_vti(study, k, refs, arrays)  # type: ignore[arg-type]
     return _download(data, _stem(study, k, "campi"), "vti", "application/xml")
 
 

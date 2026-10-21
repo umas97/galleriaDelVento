@@ -9,11 +9,14 @@
 import { C, Q } from './lattice3d.generated'
 import { requestGpu, type Gpu } from './gpu'
 import { Solver3D, packMask, type LatticeParams3D, type Sample3D } from './solver'
+import { packWalls } from './voxelize'
 
 export type SelfTest3DCase = {
   params: LatticeParams3D
   /** Solid cells as run-length pairs (start, length) over [x + nx (y + ny z)]. */
   mask: number[]
+  /** Interpolated walls as (cell, direction, byte) triples (SPEC §24.8); none = halfway. */
+  walls?: number[]
   steps: number
   /** Also measure every `measureEvery` steps (forces, density range). */
   measureEvery?: number
@@ -56,7 +59,7 @@ async function selfTest3D(c: SelfTest3DCase) {
   const p = c.params
   const n = p.nx * p.ny * p.nz
   const voxels = unpack(c.mask, n)
-  const solver = await Solver3D.create(g, p, packMask(voxels))
+  const solver = await Solver3D.create(g, p, packMask(voxels), c.walls ? packWalls(n, c.walls) : undefined)
   const start = performance.now()
   const samples: Sample3D[] = []
   const every = c.measureEvery ?? 0
