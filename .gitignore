@@ -30,3 +30,7 @@ tests/fixtures/*
 .vscode/
 .idea/
 .DS_Store
+
+# PyInstaller (packaging/windows)
+/build/
+/dist/

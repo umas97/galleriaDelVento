@@ -1,0 +1,101 @@
+galleriaDelVento per Windows
+============================
+
+Una galleria del vento in tempo reale: importi un modello 3D (STL o OBJ), un
+disegno (SVG o DXF) o la foto di uno schizzo, e guardi il flusso dell'aria o
+dell'acqua attorno alla sua sezione, con i coefficienti di resistenza e
+portanza. C'è anche una galleria 3D a griglia grossolana per il modello intero.
+
+
+REQUISITI
+---------
+
+- Windows 10 o 11 a 64 bit.
+- Microsoft Edge (c'è già su ogni Windows 10/11) oppure Google Chrome.
+- Una scheda grafica con WebGL2: la galleria 2D funziona quasi ovunque.
+  La galleria 3D richiede WebGPU e una scheda abbastanza recente; se manca,
+  il programma lo dice e tutto il resto continua a funzionare.
+- Circa 400 MB liberi per il programma, più lo spazio per i propri modelli.
+
+Non serve installare niente e non servono i permessi di amministratore.
+
+
+COME SI AVVIA
+-------------
+
+1. Estrai TUTTO lo zip in una cartella (tasto destro sullo zip ->
+   «Estrai tutto...»). Non avviarlo da dentro lo zip: non partirebbe.
+2. Apri la cartella e fai doppio clic su galleriaDelVento.exe.
+   La cartella _internal accanto serve al programma: lasciala dov'è.
+3. La prima volta Windows può mostrare «Windows ha protetto il PC»: il
+   programma non è firmato digitalmente. Clicca «Ulteriori informazioni» e poi
+   «Esegui comunque». Sui PC della scuola potrebbe servire il tecnico.
+
+Il programma si apre in una finestra sua. Chiudendo la finestra (o con
+«Esci» nel programma) si chiude tutto.
+
+Per avviarlo più comodamente: tasto destro su galleriaDelVento.exe ->
+«Invia a» -> «Desktop (crea collegamento)» (su Windows 11 «Invia a» è sotto
+«Mostra altre opzioni»).
+
+
+DOVE STANNO I TUOI DATI
+-----------------------
+
+Modelli, profili, studi e impostazioni non stanno nella cartella del
+programma, ma qui:
+
+    %LOCALAPPDATA%\galleriadelvento\
+
+(incollalo nella barra degli indirizzi di Esplora file). La sottocartella
+«dati» è il tuo lavoro: per portarlo su un altro PC o farne una copia di
+sicurezza, copia quella. I file che importi non vengono mai modificati: il
+programma ne tiene una copia sua.
+
+Attenzione: alcuni PC della scuola cancellano il profilo dell'utente quando
+ci si disconnette. Lì i dati vanno salvati altrove prima di uscire (per
+esempio esportando gli studi in PDF, CSV o JSON).
+
+Per aggiornare il programma basta sostituire la cartella con quella della
+versione nuova: i dati restano.
+
+
+SCHEDA GRAFICA DEDICATA (NVIDIA, AMD)
+-------------------------------------
+
+Il programma chiede sempre la scheda grafica più potente, ma sui portatili
+con due schede è Windows a decidere quale usa il browser. Se la galleria va
+lenta e hai una scheda dedicata:
+
+    Impostazioni -> Sistema -> Schermo -> Grafica -> Microsoft Edge (o
+    Google Chrome) -> Opzioni -> Prestazioni elevate
+
+oppure dal Pannello di controllo NVIDIA. Vale anche per quando usi Edge (o
+Chrome) per navigare.
+
+
+SE QUALCOSA NON VA
+------------------
+
+- Se il programma non parte, compare un messaggio con il motivo e la
+  posizione del registro (%LOCALAPPDATA%\galleriadelvento\stato\logs).
+- «La porta 8853 è occupata»: un altro programma la usa. Crea un
+  collegamento a galleriaDelVento.exe e, nelle sue proprietà, aggiungi alla
+  fine di «Destinazione» uno spazio e --port 8854.
+- Il programma non usa internet: non manda dati a nessuno e funziona anche
+  senza rete.
+
+
+DISINSTALLARE
+-------------
+
+Cancella la cartella del programma. Se vuoi togliere anche i tuoi dati,
+cancella %LOCALAPPDATA%\galleriadelvento.
+
+
+LICENZA
+-------
+
+galleriaDelVento è software libero, sotto licenza GPL versione 3 o
+successiva (il testo è nel file LICENSE). Il codice sorgente è su
+https://github.com/umas97/galleriaDelVento

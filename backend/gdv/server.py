@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field, ValidationError
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from . import __version__
+from . import __version__, winsupport
 from .api import (
     routes_cases,
     routes_models,
@@ -254,6 +254,8 @@ def mount_interface(app: FastAPI, root: Path) -> bool:
         return False
     # Not in every distribution's map; a manifest served as text/plain is ignored.
     mimetypes.add_type("application/manifest+json", ".webmanifest")
+    if winsupport.WINDOWS:
+        winsupport.fix_media_types()
     resolved_root = root.resolve()
 
     @app.get("/{path:path}", include_in_schema=False)

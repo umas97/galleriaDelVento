@@ -1,0 +1,92 @@
+# galleriaDelVento -- real-time 2D wind tunnel for sections, sketches and profiles
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# The Windows version (SPEC §25): tests on Windows, the executable, a trial of
+# the executable, the zip. A tag vX.Y.Z also publishes the zip as a Release;
+# started by hand, the zip stays among the run's artifacts.
+
+name: Windows
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Interfaccia
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Ambiente Python
+        run: uv sync --group windows-build
+
+      - name: Versione
+        id: version
+        run: |
+          $version = uv run python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])"
+          $package = uv run python -c "import gdv; print(gdv.__version__)"
+          if ($version -ne $package) { throw "pyproject.toml dice $version, gdv.__version__ dice $package" }
+          if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "il tag $env:GITHUB_REF_NAME non corrisponde alla versione $version"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      # Everything but the GPU and the slow physics: the runner has no GPU. The
+      # Windows network test (test_offline_windows.py) runs Edge and Chrome here.
+      - name: Test
+        run: uv run pytest -q -rs -s -m "not slow and not gpu"
+
+      - name: Eseguibile
+        run: uv run --group windows-build pyinstaller --noconfirm packaging/windows/galleriadelvento.spec
+
+      - name: Prova dell'eseguibile
+        run: uv run python packaging/windows/smoke.py dist/galleriaDelVento/galleriaDelVento.exe
+
+      - name: Zip
+        id: zip
+        run: |
+          Copy-Item packaging/windows/LEGGIMI.txt, LICENSE dist/galleriaDelVento/
+          $name = "galleriaDelVento-${{ steps.version.outputs.version }}-windows-x64.zip"
+          Compress-Archive -Path dist/galleriaDelVento -DestinationPath $name
+          $hash = (Get-FileHash $name -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name" | Out-File -Encoding ascii "$name.sha256"
+          "name=$name" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.zip.outputs.name }}
+          path: |
+            ${{ steps.zip.outputs.name }}
+            ${{ steps.zip.outputs.name }}.sha256
+
+      - name: Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create $env:GITHUB_REF_NAME
+          "${{ steps.zip.outputs.name }}" "${{ steps.zip.outputs.name }}.sha256"
+          --title "galleriaDelVento ${{ steps.version.outputs.version }}"
+          --notes "Versione per Windows 10/11 a 64 bit: scarica lo zip, estrailo tutto e avvia galleriaDelVento.exe. Istruzioni nel file LEGGIMI.txt dentro lo zip."

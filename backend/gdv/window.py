@@ -18,6 +18,9 @@ what makes it behave like a desktop program rather than a stripped browser:
   so the interface opens in an ordinary tab and explains, in one line, why it
   looks like a browser. Degraded, never mysterious.
 
+On Windows the browser is found and raised by ``winsupport`` (SPEC §25.3);
+``--class`` and ``--name`` mean nothing there and are ignored by Chrome.
+
 This module never installs or downloads a browser.
 """
 
@@ -34,6 +37,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from . import winsupport
 from .config import APP_NAME, WINDOW_PATH, get_settings
 
 __all__ = [
@@ -147,7 +151,9 @@ CHROME_OFFLINE_FLAGS: tuple[str, ...] = (
 )
 
 TAB_NOTE = (
-    f"Nessun browser compatibile con la finestra dedicata: {APP_NAME} è aperto in una "
+    winsupport.TAB_NOTE
+    if winsupport.WINDOWS
+    else f"Nessun browser compatibile con la finestra dedicata: {APP_NAME} è aperto in una "
     "scheda. Installa Chromium (sudo snap install chromium), oppure usa «Installa come "
     "app» dal menu del browser, per avere una finestra propria."
 )
@@ -181,6 +187,8 @@ def find_browser(
             return [resolved]
         _log.warning("browser indicato non trovato: %s", explicit)
         return None
+    if winsupport.WINDOWS and candidates is None:
+        return winsupport.find_browser()
     for name in BROWSER_CANDIDATES if candidates is None else candidates:
         resolved = shutil.which(name)
         if resolved:
@@ -338,6 +346,8 @@ class WindowHost:
             return {"shown": True, "opened": True, "mode": self.mode}
         if self._raise():
             return {"shown": True}
+        if winsupport.WINDOWS:
+            return {"shown": False, "reason": winsupport.WINDOW_HIDDEN}
         return {
             "shown": False,
             "reason": "la finestra è già aperta: cercala fra le finestre "
@@ -350,6 +360,8 @@ class WindowHost:
         Under Wayland neither can reach a native window; the caller then says
         where the window is instead of opening a second one.
         """
+        if winsupport.WINDOWS:
+            return winsupport.raise_window(self.pid)
         wm_class = window_class(self._command)
         for tool, argv in (
             ("wmctrl", ["-x", "-a", wm_class]),

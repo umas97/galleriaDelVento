@@ -15,6 +15,10 @@ running it -- never next to the files it works on, never inside the source tree:
 Every value can be overridden with a ``GDV_*`` environment variable, and
 the XDG variables are honoured: the tests run the whole program inside a
 temporary home that way.
+
+On Windows the same folders sit under ``%LOCALAPPDATA%\\galleriadelvento\\``
+(``dati``, ``stato``, ``config``, ``cache``; the lock in ``stato``), unless an
+XDG variable says otherwise (SPEC §25.3).
 """
 
 from __future__ import annotations
@@ -23,6 +27,8 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+
+from . import winsupport
 
 APP_ID = "galleriadelvento"
 APP_NAME = "galleriaDelVento"
@@ -45,8 +51,10 @@ def env(name: str) -> str | None:
     return os.environ.get(ENV_PREFIX + name) or None
 
 
-def _xdg(variable: str, fallback: str) -> Path:
+def _xdg(variable: str, fallback: str, windows: str) -> Path:
     raw = os.environ.get(variable)
+    if not raw and winsupport.WINDOWS:
+        return winsupport.local_app_data() / APP_ID / windows
     base = Path(raw).expanduser() if raw else Path.home() / fallback
     return base / APP_ID
 
@@ -89,17 +97,17 @@ class Settings:
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     runtime = os.environ.get("XDG_RUNTIME_DIR")
-    state = _xdg("XDG_STATE_HOME", ".local/state")
+    state = _xdg("XDG_STATE_HOME", ".local/state", "stato")
     return Settings(
         # Loopback, and deliberately not a setting: there is no option to expose
         # the program to the network, so no one can turn it on by mistake.
         host="127.0.0.1",
         port=int(env("PORT") or DEFAULT_PORT),
         log_level=(env("LOG_LEVEL") or "INFO").upper(),
-        data_dir=_xdg("XDG_DATA_HOME", ".local/share"),
+        data_dir=_xdg("XDG_DATA_HOME", ".local/share", "dati"),
         state_dir=state,
-        config_dir=_xdg("XDG_CONFIG_HOME", ".config"),
-        cache_dir=_xdg("XDG_CACHE_HOME", ".cache"),
+        config_dir=_xdg("XDG_CONFIG_HOME", ".config", "config"),
+        cache_dir=_xdg("XDG_CACHE_HOME", ".cache", "cache"),
         runtime_dir=Path(runtime) if runtime else state,
         browser=env("BROWSER"),
     )

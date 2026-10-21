@@ -83,6 +83,9 @@ def test_it_starts_answers_and_quits_from_the_interface(env, xdg_home):
     assert not (xdg_home / "run" / f"{APP_ID}.lock").exists()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="su Windows SIGTERM a un altro processo è TerminateProcess"
+)
 def test_sigterm_closes_it_cleanly(env, xdg_home):
     process, port, _ = launch(env)
     try:

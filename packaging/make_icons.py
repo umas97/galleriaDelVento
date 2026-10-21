@@ -9,6 +9,8 @@ install.sh and the interface look for:
 
 * ``packaging/icons/galleriadelvento-{48,128,256}.png`` and ``galleriadelvento.svg`` for
   the desktop (hicolor theme);
+* ``packaging/icons/galleriadelvento.ico`` for the Windows executable (SPEC §25.3),
+  each size drawn on its own;
 * ``icons/icon.svg``, ``icon-192.png``, ``icon-512.png``, ``icon-512-maskable.png``
   for the interface (favicon, PWA manifest).
 
@@ -166,6 +168,12 @@ def main() -> None:
     for size in (48, 128, 256):
         draw(size).save(DESKTOP / f"{APP_ID}-{size}.png")
     (DESKTOP / f"{APP_ID}.svg").write_text(svg(), encoding="utf-8")
+    ico = (16, 24, 32, 48, 64, 128, 256)
+    draw(256).save(
+        DESKTOP / f"{APP_ID}.ico",
+        sizes=[(s, s) for s in ico],
+        append_images=[draw(s) for s in ico[:-1]],
+    )
     draw(192).save(WEB / "icon-192.png")
     draw(512).save(WEB / "icon-512.png")
     draw(512, maskable=True).save(WEB / "icon-512-maskable.png")

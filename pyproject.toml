@@ -29,6 +29,12 @@ dev = [
     # The reference LBM solver of the tests (tests/reference/lbm2d.py, SPEC §10.8).
     "numba>=0.68.0",
 ]
+# The Windows executable (SPEC §25.3), built only by the GitHub action: on
+# Linux `uv sync` does not install it. GPL-2.0-or-later with the bootloader
+# exception, which leaves the program's own licence alone.
+windows-build = [
+    "pyinstaller>=6.11",
+]
 
 [project.scripts]
 galleriadelvento = "gdv.__main__:main"

@@ -36,6 +36,25 @@ needs WebGL2 with `EXT_color_buffer_float`). No browser is ever installed.
 
 Data lives in `~/.local/share/galleriadelvento/`, logs in `~/.local/state/galleriadelvento/logs/`.
 
+### Windows
+
+Development happens on Linux; Windows 10/11 (x64) gets a ready-made zip, for students and school
+PCs (SPEC §25). Download `galleriaDelVento-<version>-windows-x64.zip` from the
+[Releases](https://github.com/umas97/galleriaDelVento/releases), extract all of it and run
+`galleriaDelVento.exe`: no installation, no administrator rights. `LEGGIMI.txt` inside the zip
+explains it in Italian, including the SmartScreen warning of an unsigned executable.
+
+The window is Chrome if installed, otherwise Microsoft Edge, with the same offline flags. Data
+lives in `%LOCALAPPDATA%\galleriadelvento\` (`dati`, `stato\logs`, `config`, `cache`).
+
+The zip is built by [`.github/workflows/windows.yml`](.github/workflows/windows.yml) on a
+`windows-latest` runner, for every `v*` tag (and by hand, as a run artifact): it builds the
+interface, runs the tests that need no GPU, freezes the program with PyInstaller
+(`packaging/windows/galleriadelvento.spec`, a folder rather than a single file), tries the
+executable (`packaging/windows/smoke.py`) and publishes the Release. The tag must match the
+version in `pyproject.toml`. Everything Windows-specific in the code is in
+`backend/gdv/winsupport.py`, reached through one `if WINDOWS` per place.
+
 ## Usage
 
 ```sh
@@ -148,6 +167,7 @@ backend/gdv/
   security.py        who may talk to the server (Host/Origin)
   window.py          the application window (and Chrome's offline flags)
   single_instance.py one program at a time
+  winsupport.py      what Windows does differently (folders, browser, PIDs, signals)
   safety.py          the write guard: nothing is written outside the app's folders
   errors.py          errors for the user (Italian message + technical details)
   api/               FastAPI routers, one per area
@@ -184,7 +204,7 @@ frontend/src/
   lib/               API client, types mirroring the backend, binary mesh parser, settings,
                      theme
   i18n/it.ts         every user-visible string (it.guide.ts: the guide's texts, spread in)
-packaging/           icons and their generator
+packaging/           icons and their generator; windows/: the executable (spec, launcher, trial, LEGGIMI)
 scripts/             gen_lattice_ts.py: writes frontend/src/sim2d/lattice.generated.ts and
                      frontend/src/sim3d/lattice3d.generated.ts
 tests/               pytest; tests/reference/ the Numba reference solvers (2D and 3D);
@@ -224,6 +244,7 @@ All permissive licences, compatible with GPL-3.0-or-later.
 | @webgpu/types | BSD-3-Clause | TypeScript declarations of WebGPU for the 3D tunnel; no code in the bundle (development only) |
 | numba | BSD-2 | the CPU reference solver the shader is checked against (tests only) |
 | pillow | MIT-CMU | draws the icons; writes EXIF-rotated photos in the tests (development only) |
+| pyinstaller | GPL-2.0-or-later with the bootloader exception | the Windows executable (`windows-build` group, installed only by the GitHub action) |
 
 Photos in HEIC (iPhone) are not supported: they get a message asking for a JPEG. Reading
 them would need `pillow-heif` and libheif (LGPL), left out of v1.

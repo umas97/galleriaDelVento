@@ -10,6 +10,7 @@ by hand after install.sh.
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
 from pathlib import Path
@@ -18,6 +19,9 @@ import pytest
 
 from gdv.config import APP_ID
 from gdv.window import WindowHost, find_browser, window_class
+
+#: The fake browser is a shell script, which Windows cannot start.
+posix_only = pytest.mark.skipif(sys.platform == "win32", reason="il finto browser è uno script sh")
 
 
 def fake_browser(tmp_path: Path, lifetime: str = "30") -> Path:
@@ -53,6 +57,7 @@ def test_the_identity_is_ours_and_not_any_local_app(tmp_path):
     )
 
 
+@posix_only
 def test_the_window_is_a_chromium_in_application_mode(tmp_path, xdg_home):
     window = WindowHost(str(fake_browser(tmp_path)))
     window.open("http://127.0.0.1:8123/")
@@ -72,6 +77,7 @@ def test_the_window_is_a_chromium_in_application_mode(tmp_path, xdg_home):
     assert not window.alive
 
 
+@posix_only
 def test_closing_the_window_stops_the_program(tmp_path, xdg_home):
     window = WindowHost(str(fake_browser(tmp_path, lifetime="0")))
     window.open("http://127.0.0.1:8123/")

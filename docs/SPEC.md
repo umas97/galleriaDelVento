@@ -20,6 +20,10 @@ modello**, e la galleria simula la sezione corrente, aggiornandosi dal vivo ment
 sposta. In più, a programma 2D finito, una **galleria 3D** a griglia grossolana simula il
 modello intero (Fase 7, §24: approvata dall'utente il 2026-10-20).
 
+Dalla Fase 8 (§25, approvata il 2026-10-21) esiste anche una **versione per Windows**: uno zip
+che l'utente, insegnante, dà ai suoi studenti e ai PC della scuola. Lo sviluppo resta su Linux
+(§3) e la versione Linux non cambia.
+
 Il programma deve:
 
 1. **Importare modelli 3D** (STL, OBJ) di oggetti qualsiasi: veicoli, ali e droni, ciclisti e
@@ -1090,6 +1094,9 @@ coefficiente e grafico apre la voce relativa. Non è una modalità lezione: è u
   finiti restano salvati.» I punti completati di una serie si salvano man mano, quindi un crash
   non perde nulla di finito.
 - Upload: limite di 500 MB applicato dal server prima di leggere tutto il corpo.
+- **Su Windows** (§25.3): finestra con Chrome o Edge, cercati nei percorsi d'installazione;
+  la finestra si apre sempre (salvo `--no-window`); il secondo avvio la porta in primo piano
+  con le API di Windows; gli errori di avvio compaiono in una finestra di messaggio.
 
 ---
 
@@ -1112,6 +1119,8 @@ coefficiente e grafico apre la voce relativa. Non è una modalità lezione: è u
     (istantanee per il report, §11.2).
 - Log: `~/.local/state/galleriadelvento/logs/` (dallo scaffold).
 - Temporanei: `~/.cache/galleriadelvento/tmp/`, svuotata all'avvio.
+- **Su Windows** (§25.3): le stesse cartelle sotto `%LOCALAPPDATA%\galleriadelvento\`
+  (`dati\`, `stato\logs\`, `config\`, `cache\tmp\`; il lock in `stato\`).
 
 ### 14.2 Formati e versioni
 
@@ -1166,6 +1175,9 @@ esatto e si ferma. Installa comando, icone, voce di menu
 profili, studi) senza un «sì» esplicito.
 
 - La build del frontend (Vite) va nel pacchetto Python; Node serve solo per sviluppare.
+- **Windows** (§25): zip `galleriaDelVento-<versione>-windows-x64.zip` nelle Release del
+  repository, costruito e provato dall'azione `.github/workflows/windows.yml` a ogni tag `v*`;
+  dentro, l'eseguibile, la cartella `_internal`, `LEGGIMI.txt` e `LICENSE`. Niente installazione.
 - Il README spiega come aprire i `.vti`/`.vtp` in ParaView (`apt install paraview`), senza che
   sia una dipendenza.
 
@@ -1329,6 +1341,10 @@ STATO.md.
 - **Fase 7 — Galleria 3D** (§24, chiusa il 2026-10-21): 7a solutore e validazione, 7b galleria,
   7c numeri e studi, con una revisione dell'utente alla fine di ciascuna. *Accettazione*: test 35–42 (§24.4) e le misure
   di §24.4.
+- **Fase 8 — Versione per Windows** (§25, approvata il 2026-10-21): rami per Windows in
+  `gdv/winsupport.py`, eseguibile PyInstaller a cartella, azione di GitHub con test, prova
+  dell'eseguibile e Release. *Accettazione*: §25.5, compreso il collaudo dell'utente su un PC
+  della scuola.
 
 ---
 
@@ -1673,3 +1689,168 @@ l'auto 65 × 19 × 17 celle; le parti più sottili di una cella sparivano). Deci
   viene dal codice: il codice della 7b con la camera nuova fa 155–160. La camera più stretta
   (§24.8) mette le stesse 50.000 particelle in un volume più piccolo attorno al corpo e la resa
   costa di più. Il solutore da solo è invariato (226–243 contro 231–245 passi/s a Normale).
+
+---
+
+## 25. Fase 8 — Versione per Windows (approvata il 2026-10-21)
+
+> Stato: **approvata** dall'utente il 2026-10-21 («approvo tutto»), compresi PyInstaller come
+> dipendenza di build e la proposta di §25.4. Confermati anche l'eseguibile a cartella e
+> nessun intervento sulla scelta della GPU (§25.2, punti 4 e 5).
+
+### 25.1 Obiettivo
+
+Uno **zip per Windows 10/11 (x64)** da dare agli studenti e ai PC della scuola, da usare anche
+per progetti personali. Si estrae dove si vuole e si avvia `galleriaDelVento.exe`, senza
+installazione e senza permessi di amministratore. Il programma è lo stesso: stesse schermate,
+stessa fisica, stessi invarianti di §2. **La versione per Linux resta com'è**: nessun cambio di
+comportamento, di struttura, di `install.sh` o dei test esistenti.
+
+L'utente ha solo PC Linux: lo zip lo costruisce e lo prova GitHub, su una macchina Windows.
+
+### 25.2 Decisioni dell'utente (2026-10-21)
+
+1. **Un solo codice** per i due sistemi, con tutto ciò che è specifico di Windows confinato in
+   un modulo e in `packaging/windows/`. Niente rami o copie separate.
+2. **Dati nel profilo dell'utente Windows** (non accanto all'eseguibile, niente modalità
+   portatile). Se un PC della scuola azzera il profilo al logout, i dati si perdono: è un limite
+   accettato.
+3. **Build con GitHub Actions** e zip pubblicato nelle **Release** del repository pubblico, da
+   cui gli studenti lo scaricano.
+4. **Eseguibile a cartella**, non a file unico: una volta avviato va alla stessa velocità, ma il
+   file unico estrae 300–400 MB a ogni avvio (10–30 s su un disco lento) e viene segnalato più
+   spesso dagli antivirus.
+5. **GPU: nessun intervento.** Il frontend chiede già la GPU più potente
+   (`powerPreference: 'high-performance'` in WebGL2 e WebGPU); sui portatili con due GPU la
+   scelta resta al browser e a Windows. Niente flag in più e niente nome della GPU
+   nell'interfaccia; il LEGGIMI spiega come assegnare a Edge la GPU dedicata.
+
+### 25.3 Scelte tecniche (proposte)
+
+- **`backend/gdv/winsupport.py`**: l'unico modulo con codice per Windows, solo libreria
+  standard (`ctypes`, niente `pywin32`). I moduli esistenti lo usano con una sola riga di
+  smistamento (`if sys.platform == "win32"`) nei quattro punti in cui Linux e Windows
+  differiscono (i primi quattro previsti dalla bozza, gli altri trovati rileggendo il codice):
+  1. *Segnali* (`runtime.py`): su Windows non esiste `SIGHUP`; si usano `SIGINT`, `SIGTERM` e
+     `SIGBREAK`.
+  2. *Processo vivo* (`single_instance.py`): su Windows `os.kill(pid, 0)` non controlla, manda
+     un Ctrl+C (lo `0` è `CTRL_C_EVENT`). Al suo posto `OpenProcess` + `GetExitCodeProcess`.
+  3. *Cartelle* (`config.py`): tutto sotto `%LOCALAPPDATA%\galleriadelvento\` (`dati\`,
+     `stato\logs\`, `config\`, `cache\tmp\`, lock in `stato\`). Local e non Roaming: i modelli
+     arrivano a 500 MB e un profilo roaming li copierebbe a ogni accesso. Le variabili `GDV_*` e
+     `XDG_*`, se impostate, valgono anche su Windows (i test le usano per isolarsi).
+  4. *Browser* (`window.py`): Chrome se c'è, altrimenti **Microsoft Edge**, che è presente su
+     ogni Windows 10/11, accetta `--app` e `--user-data-dir` e ha WebGL2 e WebGPU. Si cercano i
+     percorsi d'installazione (`Program Files`, `Program Files (x86)`, `%LOCALAPPDATA%`), che
+     su Windows non sono nel PATH. Gli stessi percorsi servono al PDF (§11.6).
+     *Primo piano*: al secondo avvio la finestra esistente viene portata davanti con
+     `EnumWindows` + `SetForegroundWindow` sul processo della finestra (al posto di
+     `wmctrl`/`xdotool`). Se Windows lo impedisce, la finestra lampeggia nella barra.
+     Il messaggio «Installa Chromium (sudo snap install chromium)» diventa «Installa Microsoft
+     Edge o Google Chrome».
+  5. *Finestra sì o no* (`runtime.py`): su Linux la finestra si apre se c'è `DISPLAY` o
+     `WAYLAND_DISPLAY`, che su Windows non esistono; lì si apre sempre, salvo `--no-window`.
+  6. *Porta libera* (`single_instance.py`): su Windows `SO_REUSEADDR` permette di agganciarsi
+     a una porta già in ascolto, quindi la prova direbbe sempre «libera»; lì si usa
+     `SO_EXCLUSIVEADDRUSE`.
+  7. *Errori senza console*: con `--noconsole` non c'è un terminale su cui stampare. L'avvio
+     dell'eseguibile (`packaging/windows/launcher.py`, fuori dal pacchetto `gdv`) raccoglie
+     quello che il programma scrive su stderr e, se esce con un errore (porta occupata, server
+     che non parte, eccezione), lo mostra in una finestra di messaggio di Windows con il
+     percorso del log.
+  8. *Tipi dei file dell'interfaccia* (`server.py`): Python li legge dal registro di Windows,
+     dove `.js` risulta spesso `text/plain`, e Chrome rifiuta uno script modulo servito come
+     testo (finestra bianca). Su Windows i tipi dell'interfaccia (`.js`, `.css`, `.html`,
+     `.json`, `.svg`, `.png`, `.wasm`) vengono fissati sopra il registro.
+- **Eseguibile**: **PyInstaller** in modalità cartella (`--onedir`, non file unico: parte più in
+  fretta e viene scambiato meno spesso per un virus), senza console (`--noconsole`: messaggi e
+  traceback vanno nel log di `stato\logs\`), icona `.ico` generata da `packaging/make_icons.py`
+  con la stessa geometria, `backend/gdv/static/` incluso. File in `packaging/windows/`:
+  `galleriadelvento.spec`, `LEGGIMI.txt` per gli studenti (come avviarlo, l'avviso di
+  SmartScreen, dove stanno i dati, requisiti di GPU).
+- **Dipendenza nuova**: PyInstaller (GPL-2.0-or-later con eccezione per il bootloader:
+  compatibile, non impone niente al programma), solo in un gruppo `windows-build`
+  installato dall'azione, **non** nel gruppo `dev`: su Linux non si installa.
+- **Azione `.github/workflows/windows.yml`** su `windows-latest`, avviata da un tag `v*`
+  (e a mano): build del frontend, `uv sync`, test, PyInstaller, prova dell'eseguibile, zip
+  `galleriaDelVento-<versione>-windows-x64.zip` con il suo SHA-256 allegati alla Release. Il tag
+  deve coincidere con `version` di `pyproject.toml`. Ogni push di tag resta su richiesta
+  esplicita (§21.4).
+- **Nessun cambio all'interfaccia**: il frontend compilato è lo stesso.
+
+### 25.4 Invariante §2.2 (domanda bloccante)
+
+Edge è un **soggetto nuovo** per l'invariante «nessuna rete»: ha servizi Microsoft propri
+(SmartScreen, telemetria, funzioni «Edge») che la lista di §2.2, verificata su Chrome 155, non
+conosce. Proposta:
+
+- stessa lista di flag; la barriera finale `--host-resolver-rules` vale anche per Edge (nessun
+  nome si risolve tranne il loopback), quindi un servizio che chiama a casa per nome fallisce
+  prima di aprire un socket;
+- **test 4 rifatto nell'azione con Edge** (proxy di registrazione su loopback, come su Linux);
+  gli host Microsoft che compaiono vanno spenti con un flag o dirottati sulla porta 9 come per
+  Chrome, e quelli che restano si discutono con l'utente prima del rilascio;
+- se Chrome è installato si preferisce Chrome, già verificato.
+
+### 25.5 Test e accettazione
+
+- **Su Linux**: tutta la suite attuale resta verde e invariata.
+- **Test nuovi** (girano su entrambi i sistemi, con i rami Windows simulati su Linux): cartelle
+  Windows da `%LOCALAPPDATA%` e precedenza di `GDV_*`/`XDG_*`; ricerca di Edge e Chrome nei
+  percorsi di Windows; processo vivo; segnali registrati senza `SIGHUP`.
+- **Nell'azione su Windows**: pytest senza `browser`, `gpu` e `slow`. I test solo Linux
+  (`install.sh`, Flatpak, `WM_CLASS`) vengono saltati con il motivo scritto. Poi il test 4 con
+  Edge e la **prova dell'eseguibile**: avvio con `--no-window`, `GET /api/health`, controllo
+  Host/Origin, secondo avvio che riconosce il primo, chiusura con `POST /api/app/quit`,
+  lockfile rimosso.
+- **Collaudo dell'utente su un PC della scuola** (GitHub non ha GPU né schermo): avvio dallo
+  zip, finestra Edge senza barre, chiudere la finestra chiude il programma (va verificato che
+  l'«avvio rapido» o le app in background di Edge non tengano vivo il processo), galleria 2D,
+  galleria 3D, import di un STL, studio e PDF. Le misure di §17 e §24.4 valgono per l'Iris Xe e
+  sui PC della scuola si annotano soltanto.
+
+### 25.6 Ordine dei lavori
+
+1. `winsupport.py` e i quattro smistamenti, con i loro test; suite Linux verde.
+2. `packaging/windows/` e l'azione; prima corsa avviata a mano (senza tag), zip scaricato dagli
+   artefatti.
+3. Test 4 con Edge nell'azione e decisioni sugli host che compaiono (§25.4).
+4. Collaudo dell'utente su un PC della scuola, poi il primo tag e la prima Release.
+5. Dopo l'approvazione: §1, §3, §13, §14.1 e §16 aggiornati per dire che esiste una versione
+   Windows; README con una sezione per Windows.
+
+### 25.7 Rischi noti
+
+- **SmartScreen**: lo zip non è firmato, quindi al primo avvio Windows mostra «Windows ha
+  protetto il PC» → «Altre informazioni» → «Esegui comunque». Sui PC gestiti dalla scuola può
+  servire l'autorizzazione del tecnico. Firmare costa (un certificato a pagamento) ed è fuori
+  da questa fase.
+- **Antivirus**: gli eseguibili di PyInstaller ogni tanto vengono segnalati per errore; la
+  modalità a cartella riduce il problema.
+- **GPU dei PC della scuola**: il 2D richiede WebGL2 con `EXT_color_buffer_float`, il 3D WebGPU;
+  se mancano, i messaggi di §3 e §24.2 restano validi.
+- **Dimensioni**: circa 300–400 MB estratti (scipy, opencv, numpy).
+
+### 25.8 Scelte fatte nella Fase 8 (2026-10-21)
+
+- **Test 4 su Windows senza playwright** (`tests/test_offline_windows.py`): playwright aggiunge
+  switch suoi (fra cui alcuni anti-rete) che nasconderebbero proprio il traffico di Edge. Il
+  browser parte con l'argv della finestra vera, più `--proxy-server` verso il proxy di
+  registrazione di `test_offline.py`, aperto per 90 s sulla galleria di un NACA 0012. Gira su
+  Edge e su Chrome (il runner li ha entrambi) e stampa nel log dell'azione gli host estranei,
+  che §25.4 fa decidere all'utente. Un secondo test cerca ogni nome di funzione e di switch di
+  §2.2 in `msedge.dll` / `chrome.dll`, come su Linux nel binario di Chrome.
+- **Test saltati su Windows**, con il motivo: i due test della finestra con il finto browser
+  (è uno script `sh`) e quello di SIGTERM (su Windows è `TerminateProcess`). `test_install.py`
+  si salta già da solo.
+- **Prova dell'eseguibile** (`packaging/windows/smoke.py`, solo libreria standard): avvio senza
+  finestra con `%LOCALAPPDATA%` in una cartella temporanea, interfaccia e tipo degli script,
+  pagina estranea rifiutata, import di un STL (trimesh, scipy), di un SVG (svgelements), di una
+  foto PNG (OpenCV), export DXF (ezdxf), secondo avvio, «Esci», lock rimosso. Provata anche
+  sulla stessa ricetta costruita su Linux (2026-10-21: 370 MB, tutto verde).
+- **PyInstaller 6.22.3**, senza UPX (falsi allarmi degli antivirus). Icona
+  `packaging/icons/galleriadelvento.ico` (16–256 px, ogni misura disegnata a parte) generata da
+  `make_icons.py`.
+- **Azione**: Node 24, `npm ci` e build dell'interfaccia, `uv sync --group windows-build`,
+  controllo che tag, `pyproject.toml` e `gdv.__version__` coincidano, pytest senza `slow` e
+  `gpu`, PyInstaller, prova, zip con SHA-256 tra gli artefatti; con un tag, Release con `gh`.

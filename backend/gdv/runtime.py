@@ -32,7 +32,7 @@ import sys
 import threading
 from typing import Any
 
-from . import safety, single_instance
+from . import safety, single_instance, winsupport
 from .config import APP_ID, APP_NAME, Settings, get_settings
 from .controls import AppControls
 from .server import LocalServer
@@ -51,10 +51,11 @@ def want_window(args: argparse.Namespace) -> bool:
     Yes by default -- the bare command is what the menu entry runs. ``--no-window``
     turns it off, and so does a session with no display at all (SSH);
     ``--window`` overrides that check for a session whose variables lie.
+    Windows has no such variables, and a desktop session always has a screen.
     """
     if getattr(args, "no_window", False):
         return False
-    if getattr(args, "window", False):
+    if getattr(args, "window", False) or winsupport.WINDOWS:
         return True
     return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
 
@@ -86,7 +87,12 @@ def _install_signal_handlers(stop: threading.Event) -> None:
         _log.info("segnale %s: chiusura", signal.Signals(signum).name)
         stop.set()
 
-    for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    signals = (
+        winsupport.stop_signals()
+        if winsupport.WINDOWS
+        else (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+    )
+    for signum in signals:
         signal.signal(signum, handler)
 
 
@@ -168,6 +174,8 @@ def _hand_over(info: single_instance.LockInfo, with_window: bool) -> int:
     print(f"{APP_NAME} è già in esecuzione su {info.url}", flush=True)
     if not with_window:
         return 0
+    if winsupport.WINDOWS:
+        winsupport.allow_foreground()
     answer = single_instance.ask_to_show(info.port)
     if answer is None:
         print("l'istanza in esecuzione non ha risposto")

@@ -34,6 +34,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from . import winsupport
 from .config import APP_ID, APP_NAME, get_settings
 
 __all__ = [
@@ -82,6 +83,8 @@ class PortBusy(RuntimeError):
 def _pid_alive(pid: int) -> bool:
     if pid <= 0:
         return False
+    if winsupport.WINDOWS:
+        return winsupport.pid_alive(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -128,7 +131,10 @@ def server_responds(port: int, *, timeout: float = 1.0) -> bool:
 
 def port_is_free(port: int, host: str = "127.0.0.1") -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # On Windows SO_REUSEADDR binds even over a listening socket: the probe
+        # would always say "free". Exclusive use is what fails when it is taken.
+        option = socket.SO_EXCLUSIVEADDRUSE if winsupport.WINDOWS else socket.SO_REUSEADDR
+        sock.setsockopt(socket.SOL_SOCKET, option, 1)
         try:
             sock.bind((host, port))
         except OSError:
