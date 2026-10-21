@@ -235,5 +235,9 @@ def test_4_every_offline_name_exists_in_the_windows_browser(name):
     redirects = [f[2:].split("=", 1)[0] for f in CHROME_OFFLINE_FLAGS if "127.0.0.1:9/" in f]
     missing = [n for n in (*CHROME_DISABLED_FEATURES, *redirects) if n.encode() not in data]
     print(f"{name} ({library.parent.name}): sconosciuti {missing}")
+    # The GPU switches (SPEC §25.8) only for the log: unknown, they cost nothing,
+    # and the registry preference is what does the job.
+    gpu = [f[2:].split("=", 1)[0] for f in winsupport.GPU_FLAGS]
+    print(f"{name}: switch della GPU sconosciuti {[n for n in gpu if n.encode() not in data]}")
     unexpected = sorted(set(missing) - ABSENT.get(name, set()))
     assert unexpected == [], f"nomi sconosciuti a {name}: {unexpected}"

@@ -287,6 +287,7 @@ class WindowHost:
             "--no-first-run",
             "--no-default-browser-check",
             *CHROME_OFFLINE_FLAGS,
+            *(winsupport.GPU_FLAGS if winsupport.WINDOWS else ()),
         ]
 
     def open(self, url: str) -> None:
@@ -295,6 +296,8 @@ class WindowHost:
             self.url = url
             if self._command is not None:
                 profile_dir().mkdir(parents=True, exist_ok=True)
+                if winsupport.WINDOWS:
+                    self._prefer_dedicated_gpu()
                 try:
                     self.process = subprocess.Popen(  # noqa: S603 - argv built here, no shell
                         self.argv(url), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
@@ -375,11 +378,23 @@ class WindowHost:
                 return True
         return False
 
+    def _prefer_dedicated_gpu(self) -> None:
+        assert self._command is not None
+        try:
+            winsupport.prefer_dedicated_gpu(self._command[0], get_settings().state_dir)
+        except OSError as exc:  # a registry that refuses is not a reason not to open
+            _log.warning("preferenza della GPU non impostata: %s", exc)
+
     def info(self) -> dict[str, Any]:
         return {"mode": self.mode, "note": self.note, "window_pid": self.pid}
 
     def close(self, timeout: float = 5.0) -> None:
         """Close the window: politely first, then not."""
+        if winsupport.WINDOWS:
+            try:
+                winsupport.restore_gpu_preference(get_settings().state_dir)
+            except OSError as exc:
+                _log.warning("preferenza della GPU non rimessa com'era: %s", exc)
         process, self.process = self.process, None
         if process is None or process.poll() is not None:
             return

@@ -1723,10 +1723,10 @@ L'utente ha solo PC Linux: lo zip lo costruisce e lo prova GitHub, su una macchi
 4. **Eseguibile a cartella**, non a file unico: una volta avviato va alla stessa velocità, ma il
    file unico estrae 300–400 MB a ogni avvio (10–30 s su un disco lento) e viene segnalato più
    spesso dagli antivirus.
-5. **GPU: nessun intervento.** Il frontend chiede già la GPU più potente
+5. **GPU: nessun intervento** (decisione poi cambiata dall'utente il 2026-10-21, dopo la prova su
+   un portatile con NVIDIA: §25.8). Il frontend chiede già la GPU più potente
    (`powerPreference: 'high-performance'` in WebGL2 e WebGPU); sui portatili con due GPU la
-   scelta resta al browser e a Windows. Niente flag in più e niente nome della GPU
-   nell'interfaccia; il LEGGIMI spiega come assegnare a Edge la GPU dedicata.
+   scelta resta al browser e a Windows. Niente nome della GPU nell'interfaccia.
 
 ### 25.3 Scelte tecniche (proposte)
 
@@ -1889,6 +1889,24 @@ conosce. Proposta:
   «occupata da un altro programma»). Cambiando porta si perdono solo le preferenze
   dell'interfaccia in `localStorage` (l'origine cambia); il lock registra la porta vera, quindi
   il secondo avvio trova sempre il primo. Su Linux non cambia niente. Gli errori di avvio vanno
-  anche nel registro (prima erano solo stampati: il registro non esisteva), anche su Linux. La
-  prova dell'eseguibile, solo nell'azione, riserva la 8853 con `netsh` e controlla che il
-  programma ne prenda un'altra e la ritrovi al secondo avvio.
+  anche nel registro (prima erano solo stampati: il registro non esisteva), anche su Linux.
+  Nell'azione la riservazione non si può simulare: un'esclusione aggiunta con `netsh int ipv4
+  add excludedportrange` (amministrata) toglie la porta solo all'assegnazione automatica, e il
+  bind esplicito riesce lo stesso (misurato il 2026-10-21); quelle di Hyper-V non si creano su un
+  runner. La logica è coperta dai test con l'errore di Windows simulato, la prova vera è il PC
+  dell'utente.
+- **GPU dedicata sui portatili** (2026-10-21, prova dell'utente su un portatile con grafica
+  integrata e NVIDIA: la galleria usava l'integrata). Windows assegna a ogni programma una GPU e
+  ai browser dà quella a basso consumo; `powerPreference` della pagina non lo cambia. Decisione
+  dell'utente («flag + preferenza»): su Windows la finestra riceve
+  `--force-high-performance-gpu` e `--use-webgpu-power-preference=default-high-performance`
+  (il test dei nomi ne stampa la presenza nel browser, senza farne una condizione), e, mentre
+  il programma è aperto, l'eseguibile del browser ha in
+  `HKCU\Software\Microsoft\DirectX\UserGpuPreferences` il valore `GpuPreference=2;` (quello
+  che scrive Impostazioni → Schermo → Grafica, senza permessi di amministratore). Per tutta la
+  sessione e non solo all'avvio, perché il browser può riavviare il suo processo grafico. Alla
+  chiusura (`WindowHost.close`) il valore torna com'era; una scelta fatta a mano dall'utente
+  (un `GpuPreference=` già presente, o cambiato durante la sessione) non viene toccata. Cosa è
+  stato cambiato sta in `stato\gpu-preferenza.json`, così un programma chiuso a forza rimette a
+  posto al prossimo avvio. Effetto collaterale dichiarato nel LEGGIMI: un Edge usato per
+  navigare mentre il programma è aperto usa anch'esso la GPU dedicata.

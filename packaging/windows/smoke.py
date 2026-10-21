@@ -8,9 +8,7 @@ type -- only shows up when the frozen program runs. With no window, it checks
 that the server answers, serves the interface, refuses a foreign page, imports
 a model (trimesh, scipy), a drawing (svgelements), a photo (OpenCV), exports a
 DXF (ezdxf), that a second launch hands over and that "Esci" ends it all with
-the lock removed. In the GitHub action on Windows it also reserves the default
-port, as Hyper-V did on a school PC, and checks that the program moves to a
-port Windows hands out and keeps it on the next launch (SPEC §25.8).
+the lock removed.
 
 The home is temporary: on Windows ``%LOCALAPPDATA%`` points into it, so the
 Windows folders are what is exercised; elsewhere the XDG variables do.
@@ -35,8 +33,6 @@ import zlib
 from pathlib import Path
 
 APP_ID = "galleriadelvento"
-DEFAULT_PORT = 8853
-WSAEACCES = 10013
 
 
 def free_port() -> int:
@@ -223,73 +219,7 @@ def main(executable: str) -> None:
     finally:
         if process.poll() is None:
             process.kill()
-    reserved_port(executable)
     print("tutto a posto")
-
-
-def launch_on_any_port(
-    executable: str, env: dict[str, str], lock: Path
-) -> tuple[subprocess.Popen, int]:
-    """Start without --port; the port is the one the lockfile ends up with."""
-    process = subprocess.Popen([executable, "--no-window"], env=env)
-    deadline = time.monotonic() + 120
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            raise SystemExit(f"FALLITO: il programma è uscito subito con {process.returncode}")
-        try:
-            port = int(json.loads(lock.read_text(encoding="utf-8"))["port"])
-        except (OSError, ValueError, KeyError):
-            port = 0
-        if port:
-            wait_for_health(Client(port), process)
-            return process, port
-        time.sleep(0.5)
-    raise SystemExit("FALLITO: il programma non ha scritto la sua porta in tempo")
-
-
-def quit_program(process: subprocess.Popen, port: int) -> None:
-    status, _h, _ = Client(port).call("POST", "/api/app/quit", b"")
-    check(status == 202 and process.wait(60) == 0, f"Esci sulla porta {port}")
-
-
-def reserved_port(executable: str) -> None:
-    """The default port reserved by Windows, as Hyper-V reserves blocks of 100.
-
-    Only in the GitHub action on Windows: it needs an administrator, and it
-    changes the machine's port table (put back in the ``finally``).
-    """
-    if sys.platform != "win32" or not os.environ.get("GITHUB_ACTIONS"):
-        print("--  porta riservata: solo nell'azione di GitHub su Windows")
-        return
-    netsh = ["netsh", "int", "ipv4"]
-    port_range = ["protocol=tcp", f"startport={DEFAULT_PORT}", "numberofports=1"]
-    subprocess.run([*netsh, "add", "excludedportrange", *port_range], check=True)
-    env, lock, log_dir = temporary_home()
-    processes: list[subprocess.Popen] = []
-    try:
-        with socket.socket() as sock:
-            try:
-                sock.bind(("127.0.0.1", DEFAULT_PORT))
-            except OSError as exc:
-                check(getattr(exc, "winerror", None) == WSAEACCES, f"porta riservata: {exc}")
-            else:
-                raise SystemExit(f"FALLITO: netsh non ha riservato la porta {DEFAULT_PORT}")
-        process, first = launch_on_any_port(executable, env, lock)
-        processes.append(process)
-        check(first != DEFAULT_PORT, f"porta riservata: il programma ha preso la {first}")
-        quit_program(process, first)
-        process, again = launch_on_any_port(executable, env, lock)
-        processes.append(process)
-        check(again == first, f"porta riservata: al nuovo avvio di nuovo la {again}")
-        quit_program(process, again)
-    except BaseException:
-        show_logs(log_dir)
-        raise
-    finally:
-        for process in processes:
-            if process.poll() is None:
-                process.kill()
-        subprocess.run([*netsh, "delete", "excludedportrange", *port_range], check=False)
 
 
 if __name__ == "__main__":

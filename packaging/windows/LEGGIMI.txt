@@ -63,15 +63,19 @@ versione nuova: i dati restano.
 SCHEDA GRAFICA DEDICATA (NVIDIA, AMD)
 -------------------------------------
 
-Il programma chiede sempre la scheda grafica più potente, ma sui portatili
-con due schede è Windows a decidere quale usa il browser. Se la galleria va
-lenta e hai una scheda dedicata:
+Sui portatili con due schede è Windows a decidere quale usa ogni programma,
+e ai browser dà quella integrata. Per questo, mentre galleriaDelVento è
+aperto, imposta per Edge (o Chrome) «Prestazioni elevate», come farebbe
 
-    Impostazioni -> Sistema -> Schermo -> Grafica -> Microsoft Edge (o
-    Google Chrome) -> Opzioni -> Prestazioni elevate
+    Impostazioni -> Sistema -> Schermo -> Grafica
 
-oppure dal Pannello di controllo NVIDIA. Vale anche per quando usi Edge (o
-Chrome) per navigare.
+e quando lo chiudi rimette tutto com'era. Se in quel momento navighi con
+Edge, anche quello userà la scheda dedicata (consuma un po' più batteria).
+Se l'impostazione l'hai già scelta tu, il programma non la tocca. Se il
+programma viene chiuso a forza, rimette a posto al prossimo avvio.
+
+Per controllare: Gestione attività -> Prestazioni -> GPU, con la galleria
+aperta, deve lavorare la scheda NVIDIA (o AMD).
 
 
 SE QUALCOSA NON VA

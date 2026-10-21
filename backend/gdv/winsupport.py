@@ -18,6 +18,12 @@ Linux none of this runs and nothing there changes:
   dynamic range starts -- on a school PC from 1036 up, 8853 included. The
   program then takes a port Windows hands out, which is never reserved, and
   remembers it, so that the window's origin stays the same (``runtime.py``);
+* the GPU: on a laptop with two, Windows gives browsers the integrated one, and
+  a page asking for the powerful one does not change that. While the program
+  runs, the browser of the window gets the preference "high performance" in
+  the user's registry -- what Settings -> Display -> Graphics writes -- and
+  gets back what it had when the program ends; a choice the user made by
+  hand is left alone. Two Chromium switches ask the same (``window.py``);
 * the interface's media types: Python reads them from the registry, where
   programs often leave ``.js`` as ``text/plain`` -- and Chrome refuses a module
   script served as text, so the window would stay blank (``server.py``).
@@ -29,6 +35,8 @@ pure parts on Linux.
 
 from __future__ import annotations
 
+import contextlib
+import json
 import logging
 import mimetypes
 import os
@@ -47,6 +55,8 @@ __all__ = [
     "browser_paths",
     "find_browser",
     "fix_media_types",
+    "prefer_dedicated_gpu",
+    "restore_gpu_preference",
     "local_app_data",
     "pid_alive",
     "raise_window",
@@ -92,6 +102,19 @@ MEDIA_TYPES = {
     ".png": "image/png",
     ".wasm": "application/wasm",
 }
+
+#: Asked of Chromium on Windows: the high-performance GPU for WebGL and for WebGPU.
+GPU_FLAGS = (
+    "--force-high-performance-gpu",
+    "--use-webgpu-power-preference=default-high-performance",
+)
+#: Where Windows keeps each program's GPU preference: value name = executable,
+#: data like "GpuPreference=2;" (2 is high performance).
+GPU_PREFERENCES_KEY = r"Software\Microsoft\DirectX\UserGpuPreferences"
+HIGH_PERFORMANCE = "GpuPreference=2;"
+#: What the program changed, in the state folder, so that a crash is undone
+#: at the next launch.
+GPU_MARKER = "gpu-preferenza.json"
 
 #: The bind error of a port Windows reserves (WSAEACCES).
 _WSAEACCES = 10013
@@ -143,6 +166,60 @@ def remember_port(state_dir: Path, port: int) -> None:
     from . import safety
 
     safety.atomic_write_bytes(state_dir / PORT_FILE, f"{port}\n".encode())
+
+
+def _read_gpu_preference(executable: str) -> str | None:
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, GPU_PREFERENCES_KEY) as key:
+            value, _kind = winreg.QueryValueEx(key, executable)
+    except OSError:
+        return None
+    return str(value)
+
+
+def _write_gpu_preference(executable: str, value: str | None) -> None:
+    """Set the preference, or remove it with ``None``."""
+    import winreg
+
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, GPU_PREFERENCES_KEY) as key:
+        if value is None:
+            with contextlib.suppress(FileNotFoundError):
+                winreg.DeleteValue(key, executable)
+        else:
+            winreg.SetValueEx(key, executable, 0, winreg.REG_SZ, value)
+
+
+def prefer_dedicated_gpu(executable: str, state_dir: Path) -> None:
+    """Give the browser the high-performance GPU until ``restore_gpu_preference``."""
+    from . import safety
+
+    restore_gpu_preference(state_dir)
+    current = _read_gpu_preference(executable)
+    if current is not None and "GpuPreference=" in current:
+        return  # the user's own choice
+    wanted = (current or "") + HIGH_PERFORMANCE
+    marker = {"executable": executable, "original": current, "set": wanted}
+    safety.atomic_write_json(state_dir / GPU_MARKER, marker)
+    _write_gpu_preference(executable, wanted)
+    _log.info("GPU ad alte prestazioni per %s finché il programma è aperto", executable)
+
+
+def restore_gpu_preference(state_dir: Path) -> None:
+    """Put back the preference the program changed, unless the user changed it since."""
+    from . import safety
+
+    path = state_dir / GPU_MARKER
+    try:
+        marker = json.loads(path.read_text(encoding="utf-8"))
+        executable, original, wanted = marker["executable"], marker["original"], marker["set"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return
+    if _read_gpu_preference(executable) == wanted:
+        _write_gpu_preference(executable, original)
+        _log.info("preferenza della GPU di %s rimessa com'era", executable)
+    safety.remove_file(path)
 
 
 def stop_signals() -> tuple[signal.Signals, ...]:

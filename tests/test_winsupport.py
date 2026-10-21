@@ -210,6 +210,92 @@ def test_on_linux_the_port_never_moves(xdg_home, monkeypatch):
     assert asked == [8853]
 
 
+EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+
+
+@pytest.fixture
+def registry(monkeypatch, xdg_home):
+    """A fake UserGpuPreferences key; the state folder exists."""
+    values: dict[str, str] = {}
+    monkeypatch.setattr(winsupport, "_read_gpu_preference", values.get)
+
+    def write(executable, value):
+        if value is None:
+            values.pop(executable, None)
+        else:
+            values[executable] = value
+
+    monkeypatch.setattr(winsupport, "_write_gpu_preference", write)
+    get_settings().state_dir.mkdir(parents=True, exist_ok=True)
+    return values
+
+
+def test_the_browser_gets_the_dedicated_gpu_while_the_program_runs(registry):
+    state = get_settings().state_dir
+    winsupport.prefer_dedicated_gpu(EDGE, state)
+    assert registry == {EDGE: "GpuPreference=2;"}
+    winsupport.restore_gpu_preference(state)
+    assert registry == {}
+    assert not (state / winsupport.GPU_MARKER).exists()
+
+
+def test_a_choice_the_user_made_is_left_alone(registry):
+    state = get_settings().state_dir
+    registry[EDGE] = "GpuPreference=1;"
+    winsupport.prefer_dedicated_gpu(EDGE, state)
+    winsupport.restore_gpu_preference(state)
+    assert registry == {EDGE: "GpuPreference=1;"}
+
+
+def test_other_settings_of_the_browser_come_back_as_they_were(registry):
+    state = get_settings().state_dir
+    registry[EDGE] = "SwapEffectUpgradeEnable=1;"
+    winsupport.prefer_dedicated_gpu(EDGE, state)
+    assert registry[EDGE] == "SwapEffectUpgradeEnable=1;GpuPreference=2;"
+    winsupport.restore_gpu_preference(state)
+    assert registry[EDGE] == "SwapEffectUpgradeEnable=1;"
+
+
+def test_a_change_the_user_makes_meanwhile_is_kept(registry):
+    state = get_settings().state_dir
+    winsupport.prefer_dedicated_gpu(EDGE, state)
+    registry[EDGE] = "GpuPreference=1;"  # Settings, while the program runs
+    winsupport.restore_gpu_preference(state)
+    assert registry == {EDGE: "GpuPreference=1;"}
+    assert not (state / winsupport.GPU_MARKER).exists()
+
+
+def test_a_crash_is_undone_at_the_next_launch(registry):
+    state = get_settings().state_dir
+    winsupport.prefer_dedicated_gpu(EDGE, state)  # ...and the program is killed
+    assert (state / winsupport.GPU_MARKER).exists()
+    winsupport.prefer_dedicated_gpu(EDGE, state)  # the next launch
+    assert registry == {EDGE: "GpuPreference=2;"}
+    winsupport.restore_gpu_preference(state)
+    assert registry == {}
+
+
+def test_the_window_asks_for_the_dedicated_gpu_only_on_windows(monkeypatch, xdg_home):
+    host = window.WindowHost(sys.executable)
+    assert not set(winsupport.GPU_FLAGS) & set(host.argv("http://127.0.0.1:8853/"))
+    monkeypatch.setattr(winsupport, "WINDOWS", True)
+    assert set(winsupport.GPU_FLAGS) <= set(host.argv("http://127.0.0.1:8853/"))
+
+
+@on_windows
+def test_the_gpu_preference_goes_through_the_real_registry(xdg_home):
+    state = get_settings().state_dir
+    state.mkdir(parents=True, exist_ok=True)
+    fake = r"C:\gdv-test\non-esiste.exe"
+    try:
+        winsupport.prefer_dedicated_gpu(fake, state)
+        assert winsupport._read_gpu_preference(fake) == "GpuPreference=2;"
+        winsupport.restore_gpu_preference(state)
+        assert winsupport._read_gpu_preference(fake) is None
+    finally:
+        winsupport._write_gpu_preference(fake, None)
+
+
 def test_no_pid_no_window_to_raise():
     assert winsupport.raise_window(None) is False
 
