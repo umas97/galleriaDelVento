@@ -15,6 +15,7 @@ import {
   modelMatrix,
   planePoints,
   rakeNozzles,
+  rakeShape,
   rotationMatrix,
   surfacePoints,
   vertexNormals,
@@ -197,6 +198,23 @@ describe('views', () => {
     expect(v[2]).toBeGreaterThan(0)
     expect(v[10]).toBeLessThan(plan.nz)
     expect(v[1]).toBeCloseTo(20, 6)
+  })
+
+  it('a grid rake fills a rectangle of the transverse plane, row after row', () => {
+    const g = rakeNozzles({ orientation: 'grid', x: 0.5, across: 0.3, centre: 0.4, span: 0.2, nozzles: 3, rows: 2, height: 0.1 }, plan)
+    expect(g.length).toBe(4 * 6)
+    const cell = (k: number) => [g[4 * k], g[4 * k + 1], g[4 * k + 2]]
+    for (let k = 0; k < 6; k++) expect(cell(k)[0]).toBeCloseTo(25, 6)
+    // First row at the bottom (z = 0.25 m), columns from y = 0.3 to 0.5 m.
+    close([cell(0)[1], cell(1)[1], cell(2)[1]], [15, 20, 25])
+    close([cell(0)[2], cell(2)[2]], [12.5, 12.5])
+    close([cell(3)[2], cell(5)[2]], [17.5, 17.5])
+  })
+
+  it('the panel limits hold whatever the rake asks for', () => {
+    expect(rakeShape({ orientation: 'grid', x: 0, across: 0, centre: 0, span: 0, nozzles: 99, rows: 1 })).toEqual({ rows: 2, perRow: 16 })
+    expect(rakeShape({ orientation: 'horizontal', x: 0, across: 0, centre: 0, span: 0, nozzles: 99, rows: 9 })).toEqual({ rows: 1, perRow: 48 })
+    expect(rakeShape({ orientation: 'grid', x: 0, across: 0, centre: 0, span: 0, nozzles: 16, rows: 16 }).rows * 16).toBe(256) // MAX_NOZZLES in views.ts
   })
 
   it('plane points are cell centres of the plane, without the body', () => {

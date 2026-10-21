@@ -122,31 +122,49 @@ export function bodyBoxInChamber(plan: Pick<CasePlan3D, 'offset'>, box: [number,
 }
 
 /**
- * The smoke rake (SPEC §24.2 #3): a line of nozzles across the wind at
- * `x` (metres from the inlet), horizontal (along y, at height `across`) or
+ * The smoke rake (SPEC §24.2 #3): nozzles across the wind at `x` (metres
+ * from the inlet). A line, horizontal (along y, at height `across`) or
  * vertical (along z, at lateral position `across`), `span` metres wide
- * centred on `centre` (y or z).
+ * centred on `centre` (y or z); or a grid (SPEC §24.10) on the transverse
+ * plane, `nozzles` per row over `span` (y, centred on `centre`) and `rows`
+ * rows over `height` (z, centred on `across`).
  */
 export type Rake = {
-  orientation: 'horizontal' | 'vertical'
+  orientation: 'horizontal' | 'vertical' | 'grid'
   x: number
   across: number
   centre: number
   span: number
   nozzles: number
+  /** Grid only. */
+  rows?: number
+  height?: number
 }
 
-/** Nozzle positions in cells (vec4 per nozzle), inside the chamber's fluid. */
+/** Nozzles of a line, and per row and rows of a grid: what the panel allows. */
+export const RAKE_LIMITS = { line: [2, 48], grid: [2, 16] } as const
+
+/** Rows and nozzles per row of a rake, within the limits (a line is one row). */
+export function rakeShape(rake: Rake): { rows: number; perRow: number } {
+  const [lo, hi] = rake.orientation === 'grid' ? RAKE_LIMITS.grid : RAKE_LIMITS.line
+  const fit = (v: number) => Math.min(hi, Math.max(lo, Math.round(v)))
+  return { rows: rake.orientation === 'grid' ? fit(rake.rows ?? lo) : 1, perRow: fit(rake.nozzles) }
+}
+
+/** Nozzle positions in cells (vec4 per nozzle, row after row), inside the chamber's fluid. */
 export function rakeNozzles(rake: Rake, plan: Pick<CasePlan3D, 'nx' | 'ny' | 'nz' | 'dx'>): Float32Array<ArrayBuffer> {
-  const n = Math.max(1, Math.round(rake.nozzles))
-  const out = new Float32Array(4 * n)
+  const { rows, perRow } = rakeShape(rake)
+  const out = new Float32Array(4 * rows * perRow)
   const clamp = (v: number, size: number) => Math.min(size - 0.51, Math.max(0.51, v))
-  for (let i = 0; i < n; i++) {
-    const s = n === 1 ? 0 : i / (n - 1) - 0.5
-    const along = rake.centre + s * rake.span
-    const y = rake.orientation === 'horizontal' ? along : rake.across
-    const z = rake.orientation === 'horizontal' ? rake.across : along
-    out.set([clamp(rake.x / plan.dx, plan.nx), clamp(y / plan.dx, plan.ny), clamp(z / plan.dx, plan.nz), 1], 4 * i)
+  const spread = (i: number, n: number) => (n === 1 ? 0 : i / (n - 1) - 0.5)
+  for (let r = 0; r < rows; r++) {
+    for (let i = 0; i < perRow; i++) {
+      const along = rake.centre + spread(i, perRow) * rake.span
+      const height = rake.orientation === 'grid' ? rake.across + spread(r, rows) * (rake.height ?? 0) : rake.across
+      const y = rake.orientation === 'vertical' ? rake.across : along
+      const z = rake.orientation === 'vertical' ? along : height
+      out.set([clamp(rake.x / plan.dx, plan.nx), clamp(y / plan.dx, plan.ny), clamp(z / plan.dx, plan.nz), 1], 4 * (r * perRow + i))
+    }
   }
   return out
 }

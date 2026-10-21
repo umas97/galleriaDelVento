@@ -8,6 +8,7 @@
 // the system Chrome on the real GPU (WebGPU on Vulkan).
 //
 //   node tests/bench/gallery3d.bench.mjs [presets, default bozza,normale,fine] [extra Chrome flags...]
+//   GDV_BENCH_SMOKE=griglia: the smoke from a full 16 x 16 grid of nozzles (SPEC §24.10)
 import { ahmedBody } from '../synthetic.ts'
 import { launchChrome, startApp } from '../e2e/harness.mjs'
 
@@ -41,7 +42,8 @@ try {
   })
   for (const preset of presets.split(',')) {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
-    await page.goto(`${app.url}galleria3d/${id}?bench=1&risoluzione=${preset}`)
+    const smoke = process.env.GDV_BENCH_SMOKE === 'griglia' ? '&fumo=griglia' : ''
+    await page.goto(`${app.url}galleria3d/${id}?bench=1&risoluzione=${preset}${smoke}`)
     const text = await page.getByTestId('bench-result').innerText({ timeout: 180_000 })
     const r = JSON.parse(text)
     console.log(

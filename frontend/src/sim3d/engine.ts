@@ -24,6 +24,7 @@ import {
   modelMatrix,
   planePoints,
   rakeNozzles,
+  rakeShape,
   rotationMatrix,
   surfacePoints,
   voxelSurface,
@@ -387,7 +388,7 @@ export class Engine3D {
     const rake = this.options.rake
     this.nozzleCount = 0
     if (rake) {
-      const cells = rakeNozzles({ ...rake, nozzles: Math.min(MAX_NOZZLES, rake.nozzles) }, p)
+      const cells = rakeNozzles(rake, p).subarray(0, 4 * MAX_NOZZLES)
       this.nozzleCount = cells.length / 4
       const key = `${this.solver ? this.solver.cells : 0}:${cells.join(',')}`
       if (key !== this.nozzleKey) {
@@ -396,7 +397,13 @@ export class Engine3D {
         this.smokeHead = 0
       }
       const at = (k: number) => [cells[4 * k] * p.dx, cells[4 * k + 1] * p.dx, cells[4 * k + 2] * p.dx]
-      seg(at(0), at(this.nozzleCount - 1), 1)
+      // A wire per row; a grid also gets its two side posts.
+      const { rows, perRow } = rakeShape(rake)
+      for (let r = 0; r < rows; r++) seg(at(r * perRow), at(r * perRow + perRow - 1), 1)
+      if (rows > 1) {
+        seg(at(0), at((rows - 1) * perRow), 1)
+        seg(at(perRow - 1), at(rows * perRow - 1), 1)
+      }
       const tick = 1.2 * p.dx
       for (let k = 0; k < this.nozzleCount; k++) {
         const q = at(k)

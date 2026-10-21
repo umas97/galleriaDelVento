@@ -115,6 +115,10 @@ try {
   await page.getByTestId('rake-panel').waitFor()
   await page.getByTestId('rake-across').fill('400')
   await page.getByTestId('rake-panel').getByRole('combobox').selectOption('vertical')
+  // The grid of nozzles (SPEC §24.10): height and rows appear, the smoke keeps flowing.
+  await page.getByTestId('rake-panel').getByRole('combobox').selectOption('grid')
+  await page.getByTestId('rake-height').waitFor()
+  assert((await page.getByTestId('rake-panel').innerText()).includes('File'), 'righe della griglia')
   await page.keyboard.press('5')
   assert(await page.getByTestId('particles').isChecked(), 'particelle')
   await page.keyboard.press('6')

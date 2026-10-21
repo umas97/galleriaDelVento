@@ -1574,7 +1574,7 @@ alla fine di ciascuna.
   (la forma che vede il flusso). Il piano trasversale parte mezza lunghezza dietro il corpo.
 - **Cp sulla superficie**: per frammento, letto 0,75 celle fuori dalla superficie lungo la normale
   (normali dei vertici pesate per area, dalla mesh di vista).
-- **Fumo**: rastrello di 15 ugelli (2–48) orizzontale o verticale, a metà strada tra ingresso e
+- **Fumo**: rastrello di 15 ugelli (2–48) orizzontale o verticale (o a griglia, §24.10), a metà strada tra ingresso e
   corpo, largo 1,2 volte il corpo, spostabile e allargabile dal pannello; un punto per ugello a
   ogni fotogramma con flusso, 384 punti per filamento, trasporto RK2 con il numero di passi del
   fotogramma, nastri di 2 px che sfumano con l'età. Un punto che finirebbe nel corpo **scivola
@@ -1692,6 +1692,27 @@ l'auto 65 × 19 × 17 celle; le parti più sottili di una cella sparivano). Deci
   viene dal codice: il codice della 7b con la camera nuova fa 155–160. La camera più stretta
   (§24.8) mette le stesse 50.000 particelle in un volume più piccolo attorno al corpo e la resa
   costa di più. Il solutore da solo è invariato (226–243 contro 231–245 passi/s a Normale).
+
+### 24.10 Griglia di fumi (richiesta dell'utente, 2026-10-21)
+
+L'utente vuole poter usare **una griglia di ugelli, non solo una fila**. Scelte fatte, provvisorie
+fino alla sua prova:
+
+- Nel pannello del fumo, «Ugelli» ha una terza voce, **«a griglia»**: ugelli sul piano trasversale
+  (x costante), `nozzles` per fila lungo y su «Larghezza» e `rows` file lungo z su «Altezza»,
+  centrata sulla «Quota». Per una griglia «Numero di ugelli» diventa «Ugelli per fila», e c'è
+  «File»; entrambi 2–16, quindi al massimo 256 filamenti (la fila resta 2–48). Si parte da 8 × 6,
+  larga e alta 1,2 volte il corpo, a metà strada tra ingresso e corpo come la fila. Nella scena un
+  filo per fila e i due montanti laterali.
+- Il buffer dei filamenti passa da 48 a 256 ugelli (16 B × 384 punti × 256 = 1,5 MB). Ogni
+  filamento è come prima: un punto per fotogramma, 384 punti, nastri che sfumano con l'età.
+- **Misure** (2026-10-21, Iris Xe, alimentatore, «performance», benchmark con tutte le viste,
+  `GDV_BENCH_SMOKE=griglia` per una griglia 16 × 16): Normale 158 passi/s contro 166 della fila
+  (−5%), Fine 59 contro 60, 38 fps in entrambi i casi. Cali isolati del P5 (fino a 3–17 fps) si
+  sono visti in qualche corsa sia con la fila sia con la griglia: disturbo della macchina, non
+  della griglia.
+- Test: vitest della griglia (posizioni riga per riga, limiti del pannello) e l'e2e della Fase 7
+  che passa dalla griglia.
 
 ---
 

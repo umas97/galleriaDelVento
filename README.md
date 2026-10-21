@@ -86,7 +86,7 @@ free during a series and can be enlarged over the tunnel.
 
 "Galleria 3D" on a model's setup screen opens the whole model in a coarse 3D tunnel (D3Q19
 Lattice Boltzmann in WebGPU compute shaders, half a million to four million cells): smoke from a
-movable rake, particles, a cut plane coloured by speed or Cp, and Cp on the model's surface, seen
+movable rake (a row of nozzles, or a grid of up to 16 × 16), particles, a cut plane coloured by speed or Cp, and Cp on the model's surface, seen
 from a free camera (drag to orbit, right button or Shift to pan, wheel to zoom, double click to
 go back). Speed, fluid, floor, resolution and the model's yaw and pitch restart the flow; the
 views and the camera never touch it. The body's walls sit where its surface really is inside

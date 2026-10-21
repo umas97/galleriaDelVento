@@ -179,7 +179,7 @@ export const itGuide = {
   'guide.tunnel3d.surface.term': '3 · Cp sulla superficie',
   'guide.tunnel3d.surface.text': 'La pressione appena fuori dalla superficie del modello: rosso dove l’aria si ferma contro il corpo (ristagno, Cp vicino a 1), blu dove accelera aggirandolo (spigoli, tetto, dorso). È un valore istantaneo, letto mezza cella fuori dalla parete.',
   'guide.tunnel3d.smoke.term': '4 · Fumo',
-  'guide.tunnel3d.smoke.text': 'Filamenti emessi dagli ugelli del rastrello, un punto per fotogramma, trasportati dal flusso: sono linee di emissione, come il fumo vero. Il rastrello si sposta e si allarga dal pannello; orizzontale mostra come il flusso si divide di lato, verticale come passa sopra e sotto.',
+  'guide.tunnel3d.smoke.text': 'Filamenti emessi dagli ugelli del rastrello, un punto per fotogramma, trasportati dal flusso: sono linee di emissione, come il fumo vero. Il rastrello si sposta e si allarga dal pannello; orizzontale mostra come il flusso si divide di lato, verticale come passa sopra e sotto. A griglia (fino a 16 × 16 ugelli su un piano davanti al corpo) mostra tutta la sezione del flusso insieme, come una griglia di fili fumogeni.',
   'guide.tunnel3d.particles.term': '5 · Particelle',
   'guide.tunnel3d.particles.text': '50.000 particelle senza massa sparse nella camera, colorate per velocità: ogni trattino punta dove va il flusso ed è più lungo dove il flusso è più veloce.',
   'guide.tunnel3d.voxels.term': '7 · Griglia grossolana e voxel',

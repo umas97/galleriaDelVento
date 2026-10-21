@@ -29,7 +29,8 @@ export const SAMPLE_COUNT = 4
 export const PARTICLES = 50_000
 /** Points per smoke filament: one per frame of moving flow. */
 export const SMOKE_POINTS = 384
-export const MAX_NOZZLES = 48
+/** A grid of 16 × 16 (scene.ts, RAKE_LIMITS). */
+export const MAX_NOZZLES = 256
 const MAX_PROBES = 12_000
 
 type Grid = { nx: number; ny: number; nz: number }

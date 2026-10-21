@@ -29,7 +29,7 @@ import { VIEW_THRESHOLD } from '../scene3d/useModelGeometry'
 import type { CameraView } from '../sim3d/camera'
 import { Engine3D, type Snapshot3D, type ViewOptions3D } from '../sim3d/engine'
 import { WebGpuUnsupported } from '../sim3d/gpu'
-import { hexColor, vertexNormals, type BodyMesh, type PlaneAxis, type Rake } from '../sim3d/scene'
+import { hexColor, RAKE_LIMITS, vertexNormals, type BodyMesh, type PlaneAxis, type Rake } from '../sim3d/scene'
 import type { Box3, Vec3 } from '../sim3d/voxelize'
 import { VoxelClient } from '../sim3d/voxelProtocol'
 import type { WallLinks } from '../sim3d/voxelize'
@@ -136,6 +136,8 @@ function Bench3D({ model, preset, settings }: { model: ModelRecord; preset: Stud
   const query = new URLSearchParams(window.location.search)
   const benchMode = query.get('bench')
   const benchResolution = query.get('risoluzione') as Resolution | null
+  // &fumo=griglia: the worst smoke, a full 16 x 16 grid (SPEC §24.10).
+  const benchGrid = Boolean(benchMode) && query.get('fumo') === 'griglia'
   const [state, setState] = useState<Case3DState>(() => {
     const remembered = rememberedCase(settings)
     return {
@@ -335,13 +337,14 @@ function Bench3D({ model, preset, settings }: { model: ModelRecord; preset: Stud
       const axis = v.plane.axis
       const plane = before ? { ...v.plane, position: inside(v.plane.position + d[axis], axis) } : { ...v.plane, position: (y0 + y1) / 2 }
       let rake: Rake = { orientation: 'horizontal', x: x0 / 2, across: (z0 + z1) / 2, centre: (y0 + y1) / 2, span: 1.2 * (y1 - y0), nozzles: 15 }
+      if (benchGrid) rake = { ...rake, orientation: 'grid', nozzles: 16, rows: 16, height: 1.2 * (z1 - z0) }
       if (before && v.rake) {
-        const [across, along] = v.rake.orientation === 'horizontal' ? [2, 1] : [1, 2]
+        const [across, along] = v.rake.orientation === 'vertical' ? [1, 2] : [2, 1]
         rake = { ...v.rake, x: inside(v.rake.x + d[0], 0), across: inside(v.rake.across + d[across], across), centre: inside(v.rake.centre + d[along], along) }
       }
       return { ...v, plane, rake }
     })
-  }, [plan, bodyBox])
+  }, [plan, bodyBox, benchGrid])
 
   /** The plane's default place on an axis: through the body, or in its wake across the wind. */
   const planeDefault = useCallback(
@@ -358,15 +361,19 @@ function Bench3D({ model, preset, settings }: { model: ModelRecord; preset: Stud
     (orientation: Rake['orientation']) => {
       if (!bodyBox) return
       const [x0, y0, z0, , y1, z1] = bodyBox
+      const vertical = orientation === 'vertical'
       setView((v) => ({
         ...v,
         rake: {
           orientation,
           x: x0 / 2,
-          across: orientation === 'horizontal' ? (z0 + z1) / 2 : (y0 + y1) / 2,
-          centre: orientation === 'horizontal' ? (y0 + y1) / 2 : (z0 + z1) / 2,
-          span: 1.2 * (orientation === 'horizontal' ? y1 - y0 : z1 - z0),
-          nozzles: v.rake?.nozzles ?? 15,
+          across: vertical ? (y0 + y1) / 2 : (z0 + z1) / 2,
+          centre: vertical ? (z0 + z1) / 2 : (y0 + y1) / 2,
+          span: 1.2 * (vertical ? z1 - z0 : y1 - y0),
+          // A line keeps its count when turned; a grid starts at 8 × 6, a line from a grid at 15.
+          nozzles: v.rake && (v.rake.orientation === 'grid') === (orientation === 'grid') ? v.rake.nozzles : orientation === 'grid' ? 8 : 15,
+          rows: v.rake?.rows ?? 6,
+          height: 1.2 * (z1 - z0),
         },
       }))
     },
@@ -670,8 +677,10 @@ function Bench3D({ model, preset, settings }: { model: ModelRecord; preset: Stud
   // --- what is shown ----------------------------------------------------------------------
   const size = plan ? [plan.nx * plan.dx, plan.ny * plan.dx, plan.nz * plan.dx] : [1, 1, 1]
   const rake = view.rake
-  const rakeCross = rake ? (rake.orientation === 'horizontal' ? size[2] : size[1]) : 1
-  const rakeAlong = rake ? (rake.orientation === 'horizontal' ? size[1] : size[2]) : 1
+  const rakeCross = rake ? (rake.orientation === 'vertical' ? size[1] : size[2]) : 1
+  const rakeAlong = rake ? (rake.orientation === 'vertical' ? size[2] : size[1]) : 1
+  const rakeGrid = rake?.orientation === 'grid'
+  const [rakeMin, rakeMax] = rakeGrid ? RAKE_LIMITS.grid : RAKE_LIMITS.line
   const ranges = snap?.ranges
   const partialTip = plan
     ? t('tunnel3d.badge.partial.tip', { sim: num(plan.re_sim, 0), real: num(plan.re_real, 0) })
@@ -983,6 +992,7 @@ function Bench3D({ model, preset, settings }: { model: ModelRecord; preset: Stud
                     options={[
                       { value: 'horizontal', label: t('tunnel3d.rake.horizontal') },
                       { value: 'vertical', label: t('tunnel3d.rake.vertical') },
+                      { value: 'grid', label: t('tunnel3d.rake.grid') },
                     ]}
                     onChange={resetRake}
                   />
@@ -990,8 +1000,11 @@ function Bench3D({ model, preset, settings }: { model: ModelRecord; preset: Stud
                 {(
                   [
                     ['tunnel3d.rake.x', rake.x, size[0], (v: number) => setRake({ x: v }), 'rake-x'],
-                    [rake.orientation === 'horizontal' ? 'tunnel3d.rake.height' : 'tunnel3d.rake.lateral', rake.across, rakeCross, (v: number) => setRake({ across: v }), 'rake-across'],
+                    [rake.orientation === 'vertical' ? 'tunnel3d.rake.lateral' : 'tunnel3d.rake.height', rake.across, rakeCross, (v: number) => setRake({ across: v }), 'rake-across'],
                     ['tunnel3d.rake.span', rake.span, rakeAlong, (v: number) => setRake({ span: v }), 'rake-span'],
+                    ...(rakeGrid
+                      ? ([['tunnel3d.rake.gridHeight', rake.height ?? 0, size[2], (v: number) => setRake({ height: v }), 'rake-height']] as const)
+                      : []),
                   ] as const
                 ).map(([key, value, max, change, testId]) => (
                   <label key={key} className="block space-y-0.5">
@@ -1011,9 +1024,28 @@ function Bench3D({ model, preset, settings }: { model: ModelRecord; preset: Stud
                     />
                   </label>
                 ))}
-                <Row label={t('tunnel3d.rake.nozzles')}>
-                  <NumberField value={rake.nozzles} min={2} max={48} digits={0} label={t('tunnel3d.rake.nozzles')} onCommit={(v) => setRake({ nozzles: Math.round(v) })} />
+                <Row label={t(rakeGrid ? 'tunnel3d.rake.perRow' : 'tunnel3d.rake.nozzles')}>
+                  <NumberField
+                    value={rake.nozzles}
+                    min={rakeMin}
+                    max={rakeMax}
+                    digits={0}
+                    label={t(rakeGrid ? 'tunnel3d.rake.perRow' : 'tunnel3d.rake.nozzles')}
+                    onCommit={(v) => setRake({ nozzles: Math.round(v) })}
+                  />
                 </Row>
+                {rakeGrid ? (
+                  <Row label={t('tunnel3d.rake.rows')}>
+                    <NumberField
+                      value={rake.rows ?? rakeMin}
+                      min={rakeMin}
+                      max={rakeMax}
+                      digits={0}
+                      label={t('tunnel3d.rake.rows')}
+                      onCommit={(v) => setRake({ rows: Math.round(v) })}
+                    />
+                  </Row>
+                ) : null}
                 <button className="text-xs text-accent hover:underline" onClick={() => resetRake(rake.orientation)}>
                   {t('tunnel3d.rake.reset')}
                 </button>
