@@ -61,16 +61,8 @@ def browser_library(executable: Path) -> Path | None:
     return None
 
 
-@pytest.mark.browser
-@pytest.mark.parametrize("name", BROWSERS)
-def test_4_no_network_from_the_window_on_windows(name, no_network, xdg_home):  # noqa: F811
-    browser = installed(name)
-    if browser is None:
-        pytest.skip(f"{name} non installato")
-    if not (STATIC_DIR / "index.html").is_file():
-        pytest.skip("interfaccia non costruita (cd frontend && npm run build)")
-    server = LocalServer(AppControls(), "127.0.0.1", 0)
-    port = server.start()
+def window_argv(browser: Path, port: int) -> list[str]:
+    """The window's argv, opened on the tunnel of a NACA 0012 (created here)."""
     status, created = Api(port).json(
         "POST",
         "/api/profiles",
@@ -81,15 +73,58 @@ def test_4_no_network_from_the_window_on_windows(name, no_network, xdg_home):  #
         },
     )
     assert status == 200, created
-    proxy = RecordingProxy(port)
-    threading.Thread(target=proxy.serve_forever, daemon=True).start()
     tunnel = f"--app=http://127.0.0.1:{port}/galleria/profilo/{created['id']}"
-    argv = [
+    return [
         tunnel if arg.startswith("--app=") else arg
         for arg in WindowHost(str(browser)).argv(f"http://127.0.0.1:{port}/")
     ]
+
+
+def foreign_urls(net_log: Path) -> list[str]:
+    """The non-loopback URLs in a net-log -- read loosely: a killed browser leaves it unclosed."""
+    if not net_log.is_file():
+        return []
+    text = net_log.read_text(encoding="utf-8", errors="replace")
+    urls = re.findall(r'"url":"(https?://[^"]+)"', text)
+    local = re.compile(r"https?://(127\.|localhost[:/]|\[::1\])")
+    return sorted({u for u in urls if not local.match(u)})
+
+
+def remote_connections(executable: str) -> set[str]:
+    """TCP connections of the browser's processes to anything but loopback."""
+    script = (
+        f"$ids = (Get-Process {Path(executable).stem} -ErrorAction SilentlyContinue).Id; "
+        "Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object { "
+        "$ids -contains $_.OwningProcess -and "
+        "$_.RemoteAddress -notmatch '^(127\\.|::1$|0\\.0\\.0\\.0$|::$)' } | "
+        'ForEach-Object { "$($_.RemoteAddress):$($_.RemotePort)" }'
+    )
+    done = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    return {line.strip() for line in done.stdout.splitlines() if line.strip()}
+
+
+@pytest.mark.browser
+@pytest.mark.parametrize("name", BROWSERS)
+def test_4_no_network_from_the_window_on_windows(name, no_network, xdg_home, tmp_path):  # noqa: F811
+    browser = installed(name)
+    if browser is None:
+        pytest.skip(f"{name} non installato")
+    if not (STATIC_DIR / "index.html").is_file():
+        pytest.skip("interfaccia non costruita (cd frontend && npm run build)")
+    server = LocalServer(AppControls(), "127.0.0.1", 0)
+    port = server.start()
+    proxy = RecordingProxy(port)
+    threading.Thread(target=proxy.serve_forever, daemon=True).start()
+    net_log = tmp_path / "net-log.json"
+    argv = window_argv(browser, port)
     argv += [f"--proxy-server=http://127.0.0.1:{proxy.server_address[1]}"]
-    argv += ["--proxy-bypass-list=<-loopback>"]
+    argv += ["--proxy-bypass-list=<-loopback>", f"--log-net-log={net_log}"]
     process = subprocess.Popen(argv)  # noqa: S603 - argv built here
     try:
         time.sleep(IDLE_S)
@@ -101,10 +136,39 @@ def test_4_no_network_from_the_window_on_windows(name, no_network, xdg_home):  #
         server.stop()
     # In the action's log whatever happens: these are what §25.4 decides on.
     print(f"{name}: {proxy.forwarded} richieste dell'app, estranee: {proxy.foreign}")
+    print(f"{name}: URL estranei nel net-log: {foreign_urls(net_log)}")
     assert proxy.forwarded > 10, "the app's traffic did not go through the proxy"
     unexpected = [r for r in proxy.foreign if r not in KNOWN_RESIDUAL]
     assert unexpected == [], "\n".join(unexpected)
     assert no_network == [], no_network
+
+
+@pytest.mark.browser
+@pytest.mark.parametrize("name", BROWSERS)
+def test_4_the_dns_barrier_holds_in_the_real_window(name, xdg_home):
+    """The window as the program opens it, with no proxy: whatever the browser
+    tries, ``--host-resolver-rules`` must stop it before a connection exists.
+    The browser's TCP connections are listed every couple of seconds."""
+    browser = installed(name)
+    if browser is None:
+        pytest.skip(f"{name} non installato")
+    if not (STATIC_DIR / "index.html").is_file():
+        pytest.skip("interfaccia non costruita (cd frontend && npm run build)")
+    server = LocalServer(AppControls(), "127.0.0.1", 0)
+    port = server.start()
+    seen: set[str] = set()
+    process = subprocess.Popen(window_argv(browser, port))  # noqa: S603 - argv built here
+    try:
+        deadline = time.monotonic() + IDLE_S
+        while time.monotonic() < deadline:
+            seen |= remote_connections(name)
+            time.sleep(2)
+    finally:
+        process.terminate()
+        process.wait(30)
+        server.stop()
+    print(f"{name}: connessioni non loopback senza proxy: {sorted(seen)}")
+    assert seen == set(), sorted(seen)
 
 
 @pytest.mark.parametrize("name", BROWSERS)

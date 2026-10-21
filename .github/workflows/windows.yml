@@ -53,10 +53,10 @@ jobs:
           }
           "version=$version" >> $env:GITHUB_OUTPUT
 
-      # Everything but the GPU and the slow physics: the runner has no GPU. The
-      # Windows network test (test_offline_windows.py) runs Edge and Chrome here.
+      # Everything but the GPU and the slow physics (the runner has no GPU) and
+      # the network test of the window, which runs after the zip (below).
       - name: Test
-        run: uv run pytest -q -rs -s -m "not slow and not gpu"
+        run: uv run pytest -q -rs -m "not slow and not gpu" --ignore=tests/test_offline_windows.py
 
       - name: Eseguibile
         run: uv run --group windows-build pyinstaller --noconfirm packaging/windows/galleriadelvento.spec
@@ -80,6 +80,12 @@ jobs:
           path: |
             ${{ steps.zip.outputs.name }}
             ${{ steps.zip.outputs.name }}.sha256
+
+      # Test 4 on Windows (SPEC §25.4): Edge and Chrome as the window opens them.
+      # After the artifact, so that a run started by hand leaves the zip to try
+      # even when this fails; before the Release, so that no Release has traffic.
+      - name: Rete
+        run: uv run pytest -q -rs -s tests/test_offline_windows.py
 
       - name: Release
         if: github.ref_type == 'tag'
