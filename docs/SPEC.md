@@ -1857,7 +1857,7 @@ conosce. Proposta:
 - **Note di rilascio** in `docs/release-notes/<versione>.md`, in italiano per studenti e
   insegnanti: la prima riga è il titolo della Release, il resto la descrizione. Con un tag
   l'azione si ferma se il file manca (richiesta dell'utente, 2026-10-21: «descrizione e nome
-  significativo»)). Un paragrafo per riga: GitHub mostra ogni a capo della
+  significativo»). Un paragrafo per riga: GitHub mostra ogni a capo della
   descrizione di una Release.
 - **Rete di Edge, decisione dell'utente (2026-10-21, §25.4: «accettarli così»).** Nell'azione,
   Chrome 155 su Windows non fa nessuna richiesta estranea. Edge 154 ne tenta cinque, verso
